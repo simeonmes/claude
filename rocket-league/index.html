@@ -2,65 +2,124 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sideswipe Soccar</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1330">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Sideswipe — fan tribute</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="stage">
-  <canvas id="game" width="960" height="560"></canvas>
+<canvas id="game"></canvas>
 
-  <div id="hud">
-    <div class="score blue" id="scoreBlue">0</div>
-    <div class="clock" id="clock">2:00</div>
-    <div class="score orange" id="scoreOrange">0</div>
-  </div>
+<div id="banner" class="banner"><div class="big"></div><div class="sub"></div></div>
+<div id="toast" class="toast"></div>
 
-  <div id="banner"></div>
-
-  <div id="menu" class="overlay">
-    <h1>SIDESWIPE <span>SOCCAR</span></h1>
-    <p class="tag">a from-scratch arcade recreation</p>
-    <div class="modes">
-      <button id="btnAI">1 Player <small>vs. AI</small></button>
-      <button id="btn2P">2 Player <small>local</small></button>
+<div id="menu" class="screen">
+  <div class="card">
+    <div class="logo">
+      <span class="rl">ROCKET LEAGUE</span>
+      <span class="ss">SIDESWIPE</span>
+      <span class="fan">unofficial fan tribute</span>
     </div>
-    <div class="controls">
-      <div class="ctrl-col">
-        <h3>Player 1 <span class="pill blue">BLUE</span></h3>
-        <ul>
-          <li><kbd>A</kbd><kbd>D</kbd> Drive</li>
-          <li><kbd>W</kbd> Jump / Double-Jump</li>
-          <li><kbd>S</kbd> Boost</li>
-        </ul>
-      </div>
-      <div class="ctrl-col">
-        <h3>Player 2 <span class="pill orange">ORANGE</span></h3>
-        <ul>
-          <li><kbd>&larr;</kbd><kbd>&rarr;</kbd> Drive</li>
-          <li><kbd>&uarr;</kbd> Jump / Double-Jump</li>
-          <li><kbd>&darr;</kbd> Boost</li>
-        </ul>
+
+    <div class="section">
+      <div class="label">Playlist</div>
+      <div class="chips" data-group="mode">
+        <button data-value="duel">Duel<small>1v1 vs bot</small></button>
+        <button data-value="doubles">Doubles<small>2v2, bot teammate</small></button>
+        <button data-value="local">Local Duel<small>2 players</small></button>
+        <button data-value="freeplay">Free Play<small>practice</small></button>
       </div>
     </div>
-    <p class="hint">Drive on floor, walls &amp; ceiling. Jump twice for a double-jump. Ram the ball into the enemy goal!</p>
-  </div>
 
-  <div id="pause" class="overlay hidden">
-    <h2>Paused</h2>
-    <button id="btnResume">Resume</button>
-    <button id="btnQuit">Quit to Menu</button>
-  </div>
+    <div class="section">
+      <div class="label">Arena</div>
+      <div class="chips" data-group="arenaId">
+        <button data-value="shortstack">Shortstack</button>
+        <button data-value="scfield">S.C. Field</button>
+      </div>
+      <div class="blurb" id="arenaBlurb"></div>
+    </div>
 
-  <div id="gameover" class="overlay hidden">
-    <h2 id="goTitle">GOAL!</h2>
-    <p id="goSub"></p>
-    <button id="btnRematch">Rematch</button>
-    <button id="btnMenu">Main Menu</button>
-  </div>
+    <div class="section" id="levelSection">
+      <div class="label">Bot skill</div>
+      <div class="chips" data-group="level">
+        <button data-value="rookie">Rookie</button>
+        <button data-value="pro">Pro</button>
+        <button data-value="allstar">All-Star</button>
+      </div>
+    </div>
 
-  <div id="tap-hint">Press <kbd>Esc</kbd> to pause</div>
+    <button id="play" class="play">PLAY</button>
+
+    <details class="howto">
+      <summary>Controls &amp; mechanics</summary>
+      <div class="cols">
+        <div>
+          <h4>Keyboard</h4>
+          <p><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd> drive (hold to ride up walls and onto the ceiling)</p>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> in the air: aim the nose</p>
+          <p><kbd>Space</kbd> jump (hold for height), tap again to double jump</p>
+          <p>Direction + <kbd>Space</kbd> in the air: flip</p>
+          <p><kbd>Shift</kbd> boost</p>
+          <p><kbd>Q</kbd><kbd>E</kbd> or double-tap &amp; hold <kbd>A</kbd>/<kbd>D</kbd>: air roll</p>
+          <p><kbd>Esc</kbd> pause · <kbd>M</kbd> mute · <kbd>R</kbd> reset ball (Free Play)</p>
+        </div>
+        <div>
+          <h4>Local Duel</h4>
+          <p>P1: <kbd>WASD</kbd> · <kbd>Space</kbd> jump · <kbd>L-Shift</kbd> boost · <kbd>Q</kbd><kbd>E</kbd> roll</p>
+          <p>P2: arrows · <kbd>Enter</kbd> or <kbd>.</kbd> jump · <kbd>R-Shift</kbd> or <kbd>/</kbd> boost</p>
+          <h4>Touch</h4>
+          <p>Left thumb: stick. Right: Jump and Boost. Double-tap and hold the stick to air roll.</p>
+          <h4>Gamepad</h4>
+          <p>Stick drive/aim · A jump · B or RT boost · LB/X air roll · Start pause</p>
+        </div>
+        <div>
+          <h4>Tips</h4>
+          <p>Boost refills while your wheels touch any surface or the ball. There are no boost pads.</p>
+          <p>Touch the ball with your wheels in mid-air to get your flip back (flip reset).</p>
+          <p>Cars can't turn around on the ground: reverse, or hop, point the other way and land.</p>
+          <p>Roll one way and flip the other to stall in the air.</p>
+          <p>The clock starts on the first touch. At 0:00 the game ends when the ball lands.</p>
+        </div>
+      </div>
+    </details>
+
+    <div class="foot">
+      <button id="mute" class="link">Sound: On</button>
+      <span>Not affiliated with Psyonix or Epic Games.</span>
+    </div>
+  </div>
 </div>
-<script src="game.js"></script>
+
+<div id="pause" class="screen hidden">
+  <div class="card small">
+    <h2>PAUSED</h2>
+    <button id="resume" class="play">RESUME</button>
+    <button id="restart" class="secondary">Restart match</button>
+    <button id="quit" class="secondary">Main menu</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="card">
+    <h2 id="overTitle">VICTORY</h2>
+    <div id="overScore" class="final"></div>
+    <table id="overStats" class="stats"></table>
+    <button id="rematch" class="play">REMATCH</button>
+    <button id="overMenu" class="secondary">Main menu</button>
+  </div>
+</div>
+
+<div id="rotate" class="rotate"><div>↻</div>Turn your phone sideways to play</div>
+
+<script src="js/arena.js"></script>
+<script src="js/input.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
