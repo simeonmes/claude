@@ -54,6 +54,7 @@ class Car {
     this.resetFlash = 0;
     this.angAnim = 0;
     this.rollAnim = 0;
+    this.yawAnim = 0;
     this.touchCd = 0;
     this.boosting = false;
     this.ballWheelContact = false;
@@ -96,6 +97,7 @@ class Car {
     this.resetFlash -= dt;
     this.angAnim *= Math.max(0, 1 - 14 * dt);
     this.rollAnim *= Math.max(0, 1 - 10 * dt);
+    this.yawAnim = Math.max(0, this.yawAnim - dt / 0.2);
 
     if (game.frozen) {
       this.boosting = false;
@@ -163,12 +165,21 @@ class Car {
       const dv = P.COAST * dt;
       this.ds = spd <= dv ? 0 : this.ds - mdir * dv;
     }
+    // Cars face the way they drive: pushing the other way brakes, then the car swings
+    // round (a quick yaw) rather than reversing.
+    let turned = false;
+    if (want !== 0 && want === -this.face && (Math.abs(this.ds) < 260 || Math.sign(this.ds) === want)) {
+      this.face = -this.face;
+      this.yawAnim = 1;
+      turned = true;
+    }
     if (this.boosting) this.ds += this.face * P.BOOST_ACC * dt;
     this.ds += P.G * p.ty * dt; // gravity along the surface
     this.ds = clamp(this.ds, -P.MAX_SPEED, P.MAX_SPEED);
 
     this.s = (((this.s + this.ds * dt) % A.perim) + A.perim) % A.perim;
     this.syncGround(A);
+    if (turned) this.pang = this.ang + this.angAnim; // the yaw animation covers the flip; don't interpolate through it
 
     if (jumpPressed) { this.leaveGround(A, true); game.emit("jump", this); return; }
 

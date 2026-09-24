@@ -4,9 +4,9 @@
 // whether they go for aerials and flip shots.
 
 const BOT_LEVELS = {
-  rookie: { name: "Rookie", think: 0.32, boostUse: 0.25, jumpErr: 60, aerial: false, dodge: 0.25, pred: 0.4, kickBoost: false, idle: 0.18 },
-  pro: { name: "Pro", think: 0.11, boostUse: 0.75, jumpErr: 18, aerial: true, dodge: 0.8, pred: 0.95, kickBoost: true, idle: 0.03 },
-  allstar: { name: "All-Star", think: 0.04, boostUse: 1, jumpErr: 5, aerial: true, dodge: 1, pred: 1.15, kickBoost: true, idle: 0 },
+  rookie: { name: "Rookie", think: 0.32, boostUse: 0.25, jumpErr: 60, aerial: false, dodge: 0.25, pred: 0.4, kickBoost: 0.35, idle: 0.18 },
+  pro: { name: "Pro", think: 0.11, boostUse: 0.75, jumpErr: 18, aerial: true, dodge: 0.8, pred: 0.95, kickBoost: 0.8, idle: 0.03 },
+  allstar: { name: "All-Star", think: 0.04, boostUse: 1, jumpErr: 5, aerial: true, dodge: 1, pred: 1.15, kickBoost: 0.9, idle: 0 },
 };
 
 const BOT_NAMES = [
@@ -33,8 +33,6 @@ class BotBrain {
     this.holdJump = 0;
     this.pending = null;
     this.airPlan = null;
-    this.turning = false;
-    this.turnDir = 1;
     this.jitter = 0;
     this.useBoost = true;
     this.tx = 0; this.ty = 0; this.aimBall = false; this.role = "attack";
@@ -51,7 +49,7 @@ class BotBrain {
     }
 
     if (car.grounded) {
-      if (this.turning || this.airPlan) { this.turning = false; this.airPlan = null; }
+      this.airPlan = null;
       this.drive(car, game, out);
     } else {
       this.fly(car, game, out);
@@ -84,6 +82,13 @@ class BotBrain {
     this.jitter = (Math.random() * 2 - 1) * L.jumpErr;
     this.useBoost = Math.random() < L.boostUse;
     this.idle = !game.kickoff && Math.random() < L.idle; // weaker bots sometimes just hesitate
+    if (game.kickoff && this.kickId !== game.kickoffId) {
+      // Vary each kickoff (speed and where on the ball to hit) so it isn't the same
+      // shot every time.
+      this.kickId = game.kickoffId;
+      this.kickBoost = Math.random() < L.kickBoost;
+      this.kickAimY = (Math.random() * 2 - 1) * R * 0.55;
+    }
 
     // The teammate closest to the ball attacks; the other hangs back goal-side.
     let closest = car, cd = Infinity;
@@ -144,17 +149,8 @@ class BotBrain {
     out.sy = p.ty * want;
 
     if (!hopping && want !== 0 && want === car.face && car.boost > 10 &&
-        ((Math.abs(diff) > 280 && this.useBoost) || (game.kickoff && L.kickBoost))) {
+        ((Math.abs(diff) > 280 && this.useBoost) || (game.kickoff && this.kickBoost))) {
       out.boost = true;
-    }
-
-    // Can't turn around on the ground: hop, pitch over the top and land facing the other way.
-    if (want === -car.face && Math.abs(diff) > 420 && Math.abs(car.ds) < 320 && p.ny > 0.95 && this.cool <= 0) {
-      this.turnDir = -car.face * Math.sign(p.tx);
-      this.holdJump = 0.03;
-      this.turning = true;
-      this.cool = 1.1;
-      return;
     }
 
     // Retreating past a low ball: hop over it rather than shoving it at our own goal.
@@ -202,12 +198,6 @@ class BotBrain {
     const A = game.arena, ball = game.ball, R = P.BALL_R, L = this.L;
     const atk = car.team === 0 ? 1 : -1;
 
-    if (this.turning) {
-      out.sx = this.turnDir;
-      out.sy = -0.45;
-      if (this.needsRoll(car)) out.rollR = true;
-      return;
-    }
     if (this.airPlan === "hop") {
       // Hold the current nose direction level (pitching around mid-hop would swing the
       // car's length down into the ball), and double jump early for extra height.
@@ -228,7 +218,7 @@ class BotBrain {
     const goalSide = (ball.x - car.x) * atk > -R * 0.3;
     if (this.airPlan && d < 750 && this.aimBall && goalSide) {
       // Aim slightly at the ball's far side from the enemy goal so hits go forward.
-      const ax = rx - atk * R * 0.25, ay = ry;
+      const ax = rx - atk * R * 0.25, ay = ry + (game.kickoff ? this.kickAimY || 0 : 0);
       const am = Math.hypot(ax, ay) || 1;
       out.sx = ax / am;
       out.sy = ay / am;

@@ -486,6 +486,12 @@ const Render = (() => {
     }
 
     ctx.rotate(ang);
+    if (car.yawAnim > 0) {
+      // Turning around: physics already faces the new way, so start mirrored (looking
+      // like the old heading) and swing through a nose-on view to the new one.
+      const k = Math.cos(Math.PI * car.yawAnim);
+      ctx.scale(Math.sign(k || 1) * Math.max(0.14, Math.abs(k)), 1);
+    }
 
     if (car.boosting) {
       const f = 0.75 + Math.random() * 0.5;

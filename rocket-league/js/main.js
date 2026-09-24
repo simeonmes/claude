@@ -93,6 +93,7 @@ function kickoffReset(skipCountdown) {
   game.ball.place(0, kickoffBallY(A));
   game.ball.hidden = false;
   game.kickoff = true;
+  game.kickoffId = (game.kickoffId || 0) + 1;
   game.clockRunning = false;
   game.awaitGround = false;
   game.teamTouch = [null, null];
