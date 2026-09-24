@@ -928,4 +928,5 @@ const Render = (() => {
   return { init, frame, effect, resize, get size() { return { cw, ch }; } };
 })();
 
-function kickoffBallY(A) { return A.H - 170; }
+// Kickoff ball rests on the floor at midfield.
+function kickoffBallY(A) { return A.H - P.BALL_R; }

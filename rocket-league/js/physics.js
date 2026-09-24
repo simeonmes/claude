@@ -14,7 +14,9 @@ const P = {
   CAR_LEN: 78, CAR_H: 26, CAR_W: 54, RIDE: 19, WHEEL_R: 10,
   MAX_THROTTLE: 1410 * V, THROTTLE_ACC: 1600 * ACC, BRAKE: 3500 * ACC, COAST: 525 * ACC,
   MAX_SPEED: 2300 * V, BOOST_ACC: 991.67 * ACC, SUPERSONIC: 2200 * V,
-  STICK_THROTTLE: 1.3, STICK_IDLE: 0.45, // sticky force as a fraction of gravity
+  // Sticky force pulling the wheels onto walls, as a fraction of gravity. Below 1, so a
+  // car on the flat ceiling always drops off; curves at speed can still hold it on.
+  STICK_THROTTLE: 0.6, STICK_IDLE: 0.35,
   JUMP_V: 292 * V, JUMP_HOLD_ACC: 1458 * ACC, JUMP_HOLD_T: 0.2 / TIME, DOUBLE_JUMP_V: 292 * V,
   DODGE_V: 500 * V, DODGE_T: 0.65 / TIME, STALL_T: 0.55 / TIME,
   AIR_ROT_MAX: 5.5 * TIME, AIR_ROT_ACC: 23 * TIME * TIME, AIR_ROT_DAMP: 3.7 * TIME, ROLL_SPEED: 5.5 * TIME,
@@ -307,11 +309,21 @@ class Car {
       this.angVel = this.dodgeSpin;
       if (this.dodgeT <= 0) this.angVel *= 0.15;
     } else {
-      const mag = Math.hypot(inp.sx, inp.sy);
-      if (mag > 0.25) {
-        // The stick aims the nose.
-        const err = wrapAngle(Math.atan2(inp.sy, inp.sx) - this.ang);
-        const desired = clamp(err * 10, -P.AIR_ROT_MAX, P.AIR_ROT_MAX);
+      let desired = null;
+      if (inp.aim) {
+        // Bots steer by naming the direction they want the nose to point.
+        desired = clamp(wrapAngle(Math.atan2(inp.aim.y, inp.aim.x) - this.ang) * 10, -P.AIR_ROT_MAX, P.AIR_ROT_MAX);
+      } else if (Math.abs(inp.sy) > 0.25) {
+        // Pitch like Rocket League: down tilts the nose up (toward the roof), up tilts
+        // it down, whichever way the car is facing or rolled.
+        const n = this.nose(), u = this.up();
+        const noseUpDir = Math.sign(n.x * u.y - n.y * u.x) || 1;
+        desired = clamp(inp.sy, -1, 1) * noseUpDir * P.AIR_ROT_MAX;
+      } else if (Math.abs(inp.sx) > 0.25) {
+        // Left/right points the nose that way.
+        desired = clamp(wrapAngle(Math.atan2(0, inp.sx) - this.ang) * 10, -P.AIR_ROT_MAX, P.AIR_ROT_MAX);
+      }
+      if (desired !== null) {
         this.angVel += clamp(desired - this.angVel, -P.AIR_ROT_ACC * dt, P.AIR_ROT_ACC * dt);
       } else {
         this.angVel *= Math.max(0, 1 - P.AIR_ROT_DAMP * dt);
@@ -435,7 +447,7 @@ class Ball {
     this.x = x; this.y = y;
     this.vx = 0; this.vy = 0;
     this.spin = 0; this.angle = 0;
-    this.frozen = true; // kickoff ball hangs until the first touch
+    this.frozen = true; // kickoff ball waits on the floor for the first touch (starts the clock)
     this.shot = null;
     this.shotT = 0;
     this.lastTouch = null;

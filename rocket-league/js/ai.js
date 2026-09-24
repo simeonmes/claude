@@ -8,9 +8,9 @@
 const VK = P.TIME / 1.35, TK = 1.35 / P.TIME;
 
 const BOT_LEVELS = {
-  rookie: { name: "Rookie", think: 0.32, boostUse: 0.25, jumpErr: 60, aerial: false, dodge: 0.25, pred: 0.4, kickBoost: 0.35, idle: 0.18 },
-  pro: { name: "Pro", think: 0.11, boostUse: 0.75, jumpErr: 18, aerial: true, dodge: 0.8, pred: 0.95, kickBoost: 0.8, idle: 0.03 },
-  allstar: { name: "All-Star", think: 0.04, boostUse: 1, jumpErr: 5, aerial: true, dodge: 1, pred: 1.15, kickBoost: 0.9, idle: 0 },
+  rookie: { name: "Rookie", think: 0.32, boostUse: 0.25, jumpErr: 60, aerial: false, dodge: 0.25, pred: 0.4, kickBoost: 0.35, kickFlip: 0.35, idle: 0.18 },
+  pro: { name: "Pro", think: 0.11, boostUse: 0.75, jumpErr: 18, aerial: true, dodge: 0.8, pred: 0.95, kickBoost: 0.8, kickFlip: 0.85, idle: 0.03 },
+  allstar: { name: "All-Star", think: 0.04, boostUse: 1, jumpErr: 5, aerial: true, dodge: 1, pred: 1.15, kickBoost: 0.9, kickFlip: 1, idle: 0 },
 };
 
 const BOT_NAMES = [
@@ -91,6 +91,7 @@ class BotBrain {
       // shot every time.
       this.kickId = game.kickoffId;
       this.kickBoost = Math.random() < L.kickBoost;
+      this.kickFlip = Math.random() < L.kickFlip;
       this.kickAimY = (Math.random() * 2 - 1) * R * 0.55;
     }
 
@@ -165,7 +166,7 @@ class BotBrain {
     out.sy = p.ty * want;
 
     if (!hopping && want !== 0 && want === car.face && car.boost > 10 &&
-        ((Math.abs(diff) > 280 && this.useBoost) || (game.kickoff && this.kickBoost))) {
+        ((!game.kickoff && Math.abs(diff) > 280 && this.useBoost) || (game.kickoff && this.kickBoost))) {
       out.boost = true;
     }
 
@@ -180,6 +181,15 @@ class BotBrain {
       return;
     }
 
+    // Kickoff: the ball sits on the ground, so hop just before reaching it and flip in.
+    if (game.kickoff && this.kickFlip && this.cool <= 0 && want === car.face &&
+        Math.abs(ball.x - car.x) < R + 150 + Math.abs(car.ds) * 0.12 * TK) {
+      this.holdJump = 0.03;
+      this.airPlan = "shot";
+      this.cool = 1;
+      return;
+    }
+
     if (!this.aimBall || this.cool > 0) return;
     const u = car.up(), nz = car.nose();
     const rx = ball.x - car.x, ry = ball.y - car.y;
@@ -189,6 +199,7 @@ class BotBrain {
     // Only leave the ground for a ball that's still ahead of us in the attacking
     // direction. A ball we've already driven under would get hit on its front side and
     // knocked back toward our own goal.
+    const atk = car.team === 0 ? 1 : -1;
     const ahead = rx * atk;
     const attackSide = ahead > R * 0.25;
 
@@ -216,8 +227,7 @@ class BotBrain {
     if (this.airPlan === "hop") {
       // Hold the current nose direction level (pitching around mid-hop would swing the
       // car's length down into the ball), and double jump early for extra height.
-      out.sx = Math.sign(car.nose().x) || atk;
-      out.sy = 0;
+      out.aim = { x: Math.sign(car.nose().x) || atk, y: 0 };
       if (car.flipAvailable && !this.pending && car.airTime > 0.16 * TK) {
         this.holdJump = 0;
         this.pending = { t: 1 / 90, frames: 2, sx: 0 };
@@ -235,10 +245,9 @@ class BotBrain {
       // Aim slightly at the ball's far side from the enemy goal so hits go forward.
       const ax = rx - atk * R * 0.25, ay = ry + (game.kickoff ? this.kickAimY || 0 : 0);
       const am = Math.hypot(ax, ay) || 1;
-      out.sx = ax / am;
-      out.sy = ay / am;
+      out.aim = { x: ax / am, y: ay / am };
       const nz = car.nose();
-      const aligned = nz.x * out.sx + nz.y * out.sy > 0.82;
+      const aligned = nz.x * out.aim.x + nz.y * out.aim.y > 0.82;
       if ((this.airPlan === "aerial" || (this.airPlan === "reach" && ry < -110)) && aligned && car.boost > 4) out.boost = true;
 
       if (car.flipAvailable && d < R + 78 && car.airTime > 0.1 * TK && !this.pending) {
@@ -258,8 +267,7 @@ class BotBrain {
     }
 
     // Nothing to hit: fall wheels-down, nose toward where we're heading.
-    out.sx = Math.sign(this.tx - car.x) || atk;
-    out.sy = 0.3;
+    out.aim = { x: Math.sign(this.tx - car.x) || atk, y: 0.3 };
     if (this.needsRoll(car)) out.rollR = true;
   }
 }

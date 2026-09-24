@@ -196,7 +196,19 @@ function step(h) {
   }
   if (!ball.hidden) {
     ball.update(h, game);
-    for (const c of game.cars) collideCarBall(c, ball, game);
+    // Resolve every car's touch against the ball's velocity from before this step's
+    // touches, then add them up. Done one after another, a car hitting the ball on the
+    // same frame as another would see it already flying at it and fire it back (always
+    // favouring whichever car is processed last).
+    const v0x = ball.vx, v0y = ball.vy, s0 = ball.spin;
+    let dvx = 0, dvy = 0, dspin = 0;
+    for (const c of game.cars) {
+      ball.vx = v0x; ball.vy = v0y; ball.spin = s0;
+      if (collideCarBall(c, ball, game)) {
+        dvx += ball.vx - v0x; dvy += ball.vy - v0y; dspin += ball.spin - s0;
+      }
+    }
+    ball.vx = v0x + dvx; ball.vy = v0y + dvy; ball.spin = s0 + dspin;
   }
   // Sideswipe cars drive through each other; bumping is an optional mutator.
   if (game.collisions === "on") {
