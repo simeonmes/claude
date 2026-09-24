@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sideswipe Soccar</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="960" height="560"></canvas>
+
+  <div id="hud">
+    <div class="score blue" id="scoreBlue">0</div>
+    <div class="clock" id="clock">2:00</div>
+    <div class="score orange" id="scoreOrange">0</div>
+  </div>
+
+  <div id="banner"></div>
+
+  <div id="menu" class="overlay">
+    <h1>SIDESWIPE <span>SOCCAR</span></h1>
+    <p class="tag">a from-scratch arcade recreation</p>
+    <div class="modes">
+      <button id="btnAI">1 Player <small>vs. AI</small></button>
+      <button id="btn2P">2 Player <small>local</small></button>
+    </div>
+    <div class="controls">
+      <div class="ctrl-col">
+        <h3>Player 1 <span class="pill blue">BLUE</span></h3>
+        <ul>
+          <li><kbd>A</kbd><kbd>D</kbd> Drive</li>
+          <li><kbd>W</kbd> Jump / Double-Jump</li>
+          <li><kbd>S</kbd> Boost</li>
+        </ul>
+      </div>
+      <div class="ctrl-col">
+        <h3>Player 2 <span class="pill orange">ORANGE</span></h3>
+        <ul>
+          <li><kbd>&larr;</kbd><kbd>&rarr;</kbd> Drive</li>
+          <li><kbd>&uarr;</kbd> Jump / Double-Jump</li>
+          <li><kbd>&darr;</kbd> Boost</li>
+        </ul>
+      </div>
+    </div>
+    <p class="hint">Drive on floor, walls &amp; ceiling. Jump twice for a double-jump. Ram the ball into the enemy goal!</p>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <h2>Paused</h2>
+    <button id="btnResume">Resume</button>
+    <button id="btnQuit">Quit to Menu</button>
+  </div>
+
+  <div id="gameover" class="overlay hidden">
+    <h2 id="goTitle">GOAL!</h2>
+    <p id="goSub"></p>
+    <button id="btnRematch">Rematch</button>
+    <button id="btnMenu">Main Menu</button>
+  </div>
+
+  <div id="tap-hint">Press <kbd>Esc</kbd> to pause</div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
