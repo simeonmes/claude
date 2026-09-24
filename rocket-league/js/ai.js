@@ -3,6 +3,10 @@
 // obey the same physics. Difficulty changes reaction time, boost use, jump accuracy and
 // whether they go for aerials and flip shots.
 
+// Speeds and timings below were tuned at game speed TIME = 1.35; these keep them in
+// step with P.TIME (speeds scale with it, durations inversely).
+const VK = P.TIME / 1.35, TK = 1.35 / P.TIME;
+
 const BOT_LEVELS = {
   rookie: { name: "Rookie", think: 0.32, boostUse: 0.25, jumpErr: 60, aerial: false, dodge: 0.25, pred: 0.4, kickBoost: 0.35, idle: 0.18 },
   pro: { name: "Pro", think: 0.11, boostUse: 0.75, jumpErr: 18, aerial: true, dodge: 0.8, pred: 0.95, kickBoost: 0.8, idle: 0.03 },
@@ -74,7 +78,7 @@ class BotBrain {
     const ogx = -egx;
 
     const d = Math.hypot(ball.x - car.x, ball.y - car.y);
-    const tp = ball.frozen ? 0 : clamp(d / 1500, 0, 0.9) * L.pred;
+    const tp = ball.frozen ? 0 : clamp(d / (1500 * VK), 0, 0.9 * TK) * L.pred;
     let bx = ball.x + ball.vx * tp;
     let by = Math.min(ball.y + ball.vy * tp + 0.5 * P.G * tp * tp, A.H - R);
     bx = clamp(bx, -A.W + R * 0.5, A.W - R * 0.5);
@@ -97,7 +101,7 @@ class BotBrain {
       const md = Math.hypot(ball.x - m.x, ball.y - m.y) + (m.grounded ? 0 : 60);
       if (md < cd) { cd = md; closest = m; }
     }
-    const danger = ball.x * -atk > A.W * 0.3 && ball.vx * -atk > 250;
+    const danger = ball.x * -atk > A.W * 0.3 && ball.vx * -atk > 250 * VK;
     this.role = closest === car || danger || game.kickoff ? "attack" : "support";
 
     if (this.role === "support") {
@@ -136,13 +140,25 @@ class BotBrain {
     const A = game.arena, ball = game.ball, R = P.BALL_R, L = this.L;
     const p = car.gp;
     const nearWall = Math.abs(this.tx) > A.W - 180 && this.ty < A.H - 160;
-    const sT = nearWall ? pathNearest(A, this.tx, this.ty).s : floorS(A, clamp(this.tx, -A.W + 30, A.W - 30));
+    // Stay below the goal's lower lip at either end: driving up to it launches the car
+    // off the edge past the ball (knocking it back the wrong way) or into our own goal
+    // mouth. Jump from the ramp instead.
+    const wallY = Math.max(this.ty, A.gB + 90);
+    const sT = nearWall ? pathNearest(A, this.tx, wallY).s : floorS(A, clamp(this.tx, -A.W + 30, A.W - 30));
     const diff = pathDelta(A, car.s, sT);
     let want = Math.abs(diff) < 22 ? 0 : Math.sign(diff);
     // Heading back past a low ball: arrive slow enough to time a hop over it.
     const ballAhead = Math.sign(ball.x - car.x) === Math.sign(car.vx || 1) && Math.abs(ball.x - car.x) < 650;
     const hopping = this.hop && ballAhead;
-    if (hopping && Math.abs(car.ds) > 850) want = 0;
+    if (hopping && Math.abs(car.ds) > 850 * VK) want = 0;
+    // Arrive rather than overshoot when heading somewhere other than the ball: brake
+    // (push the other way) while fast, then let go before the car would turn round.
+    // Otherwise a boosting bot sails past its spot, up the quarterpipe and off the
+    // goal lip into the air in front of its own net.
+    if ((!this.aimBall || nearWall) && want !== 0 && Math.sign(car.ds) === want) {
+      const stopDist = (car.ds * car.ds) / (2 * P.BRAKE) + 30;
+      if (Math.abs(diff) < stopDist) want = Math.abs(car.ds) > P.TURN_SPEED * 1.3 ? -want : 0;
+    }
     if (this.waitBall && ballAhead) want = 0;
     if (this.idle) want = 0;
     out.sx = p.tx * want;
@@ -157,7 +173,7 @@ class BotBrain {
     // A full jump plus an early double jump clears the ball about 0.3s after takeoff,
     // so take off that far out (plus the ball radius and half a car).
     const closing = (car.vx - ball.vx) * Math.sign(ball.x - car.x);
-    if (hopping && this.cool <= 0 && closing > 120 && Math.abs(ball.x - car.x) < R + 48 + closing * 0.3) {
+    if (hopping && this.cool <= 0 && closing > 120 * VK && Math.abs(ball.x - car.x) < R + 48 + closing * 0.3 * TK) {
       this.holdJump = P.JUMP_HOLD_T + 0.02;
       this.airPlan = "hop";
       this.cool = 0.9;
@@ -165,19 +181,18 @@ class BotBrain {
     }
 
     if (!this.aimBall || this.cool > 0) return;
-    const atk = car.team === 0 ? 1 : -1;
     const u = car.up(), nz = car.nose();
     const rx = ball.x - car.x, ry = ball.y - car.y;
     const hUp = rx * u.x + ry * u.y;
     const along = rx * nz.x + ry * nz.y;
-    const reach = Math.abs(car.ds) * 0.14;
+    const reach = Math.abs(car.ds) * 0.14 * TK;
     // Only leave the ground for a ball that's still ahead of us in the attacking
     // direction. A ball we've already driven under would get hit on its front side and
     // knocked back toward our own goal.
     const ahead = rx * atk;
     const attackSide = ahead > R * 0.25;
 
-    if (L.aerial && ahead > R * 0.3 && hUp > 330 && ahead < 300 && car.boost > 45 && ball.vy > -350) {
+    if (L.aerial && ahead > R * 0.3 && hUp > 330 && ahead < 300 && car.boost > 45 && ball.vy > -350 * VK) {
       this.holdJump = P.JUMP_HOLD_T + 0.02;
       this.airPlan = "aerial";
       this.cool = 0.6;
@@ -203,7 +218,7 @@ class BotBrain {
       // car's length down into the ball), and double jump early for extra height.
       out.sx = Math.sign(car.nose().x) || atk;
       out.sy = 0;
-      if (car.flipAvailable && !this.pending && car.airTime > 0.16) {
+      if (car.flipAvailable && !this.pending && car.airTime > 0.16 * TK) {
         this.holdJump = 0;
         this.pending = { t: 1 / 90, frames: 2, sx: 0 };
       }
@@ -226,12 +241,12 @@ class BotBrain {
       const aligned = nz.x * out.sx + nz.y * out.sy > 0.82;
       if ((this.airPlan === "aerial" || (this.airPlan === "reach" && ry < -110)) && aligned && car.boost > 4) out.boost = true;
 
-      if (car.flipAvailable && d < R + 78 && car.airTime > 0.1 && !this.pending) {
+      if (car.flipAvailable && d < R + 78 && car.airTime > 0.1 * TK && !this.pending) {
         // Only flip when it sends the ball toward their goal; a flip from the ball's
         // far side would drive it into our own net.
         const dir = Math.sign(rx) || atk;
         // Ball must stay in front through the flip's first frames, so a fast car needs more room.
-        const ahead = rx * atk > 18 + Math.max(0, car.vx * atk) * 0.03;
+        const ahead = rx * atk > 18 + Math.max(0, car.vx * atk) * 0.03 * TK;
         // Flip only into a ball at car height; under a high ball the spinning tail swats it back.
         const level = Math.abs(ry) < R + 25;
         if (dir === atk && ahead && level && Math.random() < L.dodge) {

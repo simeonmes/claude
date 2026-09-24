@@ -1,19 +1,27 @@
 "use strict";
-// Car and ball physics. Constants are Rocket League's, scaled to this arena (the ball
-// is ~0.64x RL size) and sped up 1.35x in time, since Sideswipe plays faster than RL.
+// Car and ball physics. Every constant is Rocket League's (in its units, uu), scaled
+// to this arena: SIZE maps lengths (the ball here is ~0.64x RL's), and TIME speeds the
+// game up. Scaling speeds by SIZE*TIME and accelerations by SIZE*TIME^2 keeps every
+// trajectory the same shape (jump heights, shot arcs) and only changes how fast it
+// plays, so TIME is the one knob for overall game speed.
+const SIZE = 0.637;
+const TIME = 1.1;
+const V = SIZE * TIME, ACC = SIZE * TIME * TIME;
 
 const P = {
-  G: 760,
+  SIZE, TIME,
+  G: 650 * ACC,
   CAR_LEN: 78, CAR_H: 26, CAR_W: 54, RIDE: 19, WHEEL_R: 10,
-  MAX_THROTTLE: 1210, THROTTLE_ACC: 1860, BRAKE: 4000, COAST: 600,
-  MAX_SPEED: 1980, BOOST_ACC: 1150, SUPERSONIC: 1760,
-  STICK_THROTTLE: 1.3, STICK_IDLE: 0.45,
-  JUMP_V: 255, JUMP_HOLD_ACC: 1700, JUMP_HOLD_T: 0.15, DOUBLE_JUMP_V: 255,
-  DODGE_V: 440, DODGE_T: 0.5, STALL_T: 0.42,
-  AIR_ROT_MAX: 7.4, AIR_ROT_ACC: 42, AIR_ROT_DAMP: 5, ROLL_SPEED: 7.4,
-  BOOST_MAX: 100, BOOST_DRAIN: 45, BOOST_REGEN: 62,
-  BALL_R: 58, BALL_MAX: 5000, BALL_REST: 0.6, BALL_DRAG: 0.03,
+  MAX_THROTTLE: 1410 * V, THROTTLE_ACC: 1600 * ACC, BRAKE: 3500 * ACC, COAST: 525 * ACC,
+  MAX_SPEED: 2300 * V, BOOST_ACC: 991.67 * ACC, SUPERSONIC: 2200 * V,
+  STICK_THROTTLE: 1.3, STICK_IDLE: 0.45, // sticky force as a fraction of gravity
+  JUMP_V: 292 * V, JUMP_HOLD_ACC: 1458 * ACC, JUMP_HOLD_T: 0.2 / TIME, DOUBLE_JUMP_V: 292 * V,
+  DODGE_V: 500 * V, DODGE_T: 0.65 / TIME, STALL_T: 0.55 / TIME,
+  AIR_ROT_MAX: 5.5 * TIME, AIR_ROT_ACC: 23 * TIME * TIME, AIR_ROT_DAMP: 3.7 * TIME, ROLL_SPEED: 5.5 * TIME,
+  BOOST_MAX: 100, BOOST_DRAIN: 33.3 * TIME, BOOST_REGEN: 46 * TIME,
+  BALL_R: 58, BALL_MAX: 6000 * V, BALL_REST: 0.6, BALL_DRAG: 0.0305 * TIME,
   BALL_MASS: 30, CAR_MASS: 180,
+  TURN_SPEED: 260 * TIME / 1.35, // below this ground speed, pushing the other way swings the car round
 };
 
 function throttleAcc(speed) {
@@ -55,6 +63,8 @@ class Car {
     this.angAnim = 0;
     this.rollAnim = 0;
     this.yawAnim = 0;
+    this.neutralJumpT = 0;
+    this.wheelBallT = 0;
     this.touchCd = 0;
     this.boosting = false;
     this.ballWheelContact = false;
@@ -98,6 +108,8 @@ class Car {
     this.angAnim *= Math.max(0, 1 - 14 * dt);
     this.rollAnim *= Math.max(0, 1 - 10 * dt);
     this.yawAnim = Math.max(0, this.yawAnim - dt / 0.2);
+    this.neutralJumpT -= dt;
+    this.wheelBallT -= dt;
 
     if (game.frozen) {
       this.boosting = false;
@@ -108,6 +120,14 @@ class Car {
     this.boosting = inp.boost && this.boost > 0.5;
     if (this.grounded) this.updateGround(dt, inp, jumpPressed, game);
     else this.updateAir(dt, inp, jumpPressed, game);
+
+    // Inside a goal the net soaks up speed, so driving or flying into it stops the car
+    // instead of looping it round the net's walls and flinging it back out.
+    if (Math.abs(this.x) > A.W + 4 && this.y > A.gT && this.y < A.gB) {
+      const k = Math.max(0, 1 - 4 * dt);
+      if (this.grounded) this.ds *= k;
+      else { this.vx *= k; if (this.vy < 0) this.vy *= k; }
+    }
 
     if (this.boosting) this.boost = Math.max(0, this.boost - P.BOOST_DRAIN * dt);
     else if (this.grounded || this.ballWheelContact) this.boost = Math.min(P.BOOST_MAX, this.boost + P.BOOST_REGEN * dt);
@@ -168,7 +188,7 @@ class Car {
     // Cars face the way they drive: pushing the other way brakes, then the car swings
     // round (a quick yaw) rather than reversing.
     let turned = false;
-    if (want !== 0 && want === -this.face && (Math.abs(this.ds) < 260 || Math.sign(this.ds) === want)) {
+    if (want !== 0 && want === -this.face && (Math.abs(this.ds) < P.TURN_SPEED || Math.sign(this.ds) === want)) {
       this.face = -this.face;
       this.yawAnim = 1;
       turned = true;
@@ -235,23 +255,47 @@ class Car {
     const rollIn = (inp.rollR ? 1 : 0) - (inp.rollL ? 1 : 0);
 
     if (jumpPressed && this.flipAvailable && this.airTime > 0.04) {
-      const dx = Math.abs(inp.sx) > 0.35 ? Math.sign(inp.sx) : 0;
-      if (dx !== 0 && rollIn === -dx) {
+      const mag = Math.hypot(inp.sx, inp.sy);
+      const dx = mag > 0.35 ? inp.sx / mag : 0, dy = mag > 0.35 ? inp.sy / mag : 0;
+      if (mag > 0.35 && rollIn !== 0 && Math.abs(dx) > 0.5 && Math.sign(dx) === -rollIn) {
         // Stall: air roll one way + flip the other cancels the flip into a hover.
         this.stallT = P.STALL_T;
         this.vy = Math.min(this.vy, 0) * 0.2;
         this.vx *= 0.85;
         game.emit("stall", this);
-      } else if (dx !== 0) {
+      } else if (mag > 0.35) {
+        // Flip toward the stick, in any direction. Horizontal flips spin the way the
+        // flip goes; straight up/down spins like a back/front flip for the car's nose.
+        const n = this.nose();
+        const spinDir = Math.abs(dx) > 0.25 ? Math.sign(dx) : (dy < 0 ? -1 : 1) * (Math.sign(n.x) || 1);
         this.dodgeT = P.DODGE_T;
-        this.dodgeSpin = (dx * TAU) / P.DODGE_T;
+        this.dodgeSpin = (spinDir * TAU) / P.DODGE_T;
         this.vx += dx * P.DODGE_V;
-        this.vy = this.vy > 0 ? this.vy * 0.2 : this.vy * 0.7;
+        this.vy = this.vy * (this.vy > 0 ? 0.2 : 0.7) + dy * P.DODGE_V;
         game.emit("dodge", this);
       } else {
         const u = this.up();
         this.vx += u.x * P.DOUBLE_JUMP_V;
         this.vy += u.y * P.DOUBLE_JUMP_V;
+        this.neutralJumpT = 0.5 / P.TIME; // window for a purple shot
+        const b = game.ball;
+        if (this.wheelBallT > 0 && b && !b.hidden) {
+          // Jumping off the ball with the wheels on it (the "purple flick"): the ball
+          // takes the jump's recoil and glows purple.
+          const wasFrozen = b.frozen;
+          b.frozen = false;
+          const kick = 1000 * V;
+          b.vx -= u.x * kick;
+          b.vy -= u.y * kick;
+          b.shot = SHOTS.purple;
+          b.shotT = 1.5;
+          b.lastTouch = this;
+          this.stats.touches++;
+          this.touchCd = 0.1;
+          game.onTouch(this, wasFrozen);
+          game.emit("shot", this, { shot: SHOTS.purple, x: b.x, y: b.y });
+          game.emit("hit", this, { power: 0.9, x: b.x, y: b.y });
+        }
         game.emit("jump", this);
       }
       this.flipAvailable = false;
@@ -311,7 +355,7 @@ class Car {
     const align = -(u.x * nb.nx + u.y * nb.ny); // 1 when the wheels face the surface
     const vn = this.vx * nb.nx + this.vy * nb.ny; // speed into the surface
 
-    if (align > 0.45 || (align > -0.2 && vn < 380) || vn < 240) {
+    if (align > 0.45 || (align > -0.2 && vn < 440 * V) || vn < 280 * V) {
       this.land(game, vn);
       return;
     }
@@ -325,7 +369,7 @@ class Car {
     const dA = wrapAngle(Math.atan2(-nb.ny, -nb.nx) - Math.atan2(u.y, u.x));
     this.angVel = this.angVel * 0.4 + clamp(dA, -1, 1) * 5;
     this.dodgeT = 0;
-    game.emit("bump", this, { power: clamp(vn / 1200, 0, 1) });
+    game.emit("bump", this, { power: clamp(vn / (1400 * V), 0, 1) });
   }
 
   land(game, impact) {
@@ -343,13 +387,14 @@ class Car {
     this.jumpHoldT = 0;
     this.dodgeT = 0;
     this.stallT = 0;
+    this.neutralJumpT = 0;
     this.angVel = 0;
     this.syncGround(A);
     // Ease the body into its new orientation instead of snapping (also animates a
     // car that landed on its roof rolling back onto its wheels).
     this.angAnim = wrapAngle(oldAng - this.ang);
     this.rollAnim = wrapAngle(oldRoll - this.roll);
-    if (impact > 160) game.emit("land", this, { power: clamp(impact / 1400, 0, 1) });
+    if (impact > 190 * V) game.emit("land", this, { power: clamp(impact / (1630 * V), 0, 1) });
   }
 
   // Apply a velocity change from a collision. A grounded car only gets knocked off its
@@ -358,7 +403,7 @@ class Car {
     if (this.grounded) {
       const p = this.gp;
       const away = -(dvx * p.nx + dvy * p.ny);
-      if (away > 220) {
+      if (away > 260 * V) {
         this.leaveGround(A, false);
         this.vx += dvx;
         this.vy += dvy;
@@ -391,6 +436,8 @@ class Ball {
     this.vx = 0; this.vy = 0;
     this.spin = 0; this.angle = 0;
     this.frozen = true; // kickoff ball hangs until the first touch
+    this.shot = null;
+    this.shotT = 0;
     this.lastTouch = null;
     this.touchedSurface = false;
     this.px = x; this.py = y;
@@ -411,6 +458,8 @@ class Ball {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.angle += this.spin * dt;
+    this.shotT -= dt;
+    if (this.shotT <= 0) this.shot = null;
 
     for (let i = 0; i < 2; i++) {
       const nb = pathNearest(A, this.x, this.y);
@@ -423,13 +472,13 @@ class Ball {
       if (vn > 0) {
         this.vx -= (1 + P.BALL_REST) * vn * nb.nx;
         this.vy -= (1 + P.BALL_REST) * vn * nb.ny;
-        if (vn > 180) game.emit("ballBounce", null, { power: clamp(vn / 2500, 0, 1), x: this.x + nb.nx * R, y: this.y + nb.ny * R });
+        if (vn > 210 * V) game.emit("ballBounce", null, { power: clamp(vn / (2900 * V), 0, 1), x: this.x + nb.nx * R, y: this.y + nb.ny * R });
       }
       // Friction at the contact point couples spin and sliding: a solid sphere stops
       // slipping once v_t + w*R = 0, which takes an impulse of slip/3.5.
       const tx = -nb.ny, ty = nb.nx;
       const slip = this.vx * tx + this.vy * ty + this.spin * R;
-      const f = vn > 0 ? clamp(vn / 600, 0.15, 1) * 0.6 : Math.min(1, 10 * dt);
+      const f = vn > 0 ? clamp(vn / (700 * V), 0.15, 1) * 0.6 : Math.min(1, 10 * dt);
       const J = (-slip / 3.5) * f;
       this.vx += tx * J;
       this.vy += ty * J;
@@ -440,6 +489,14 @@ class Ball {
 
 // Ball vs the car's box hitbox, with Rocket League's extra "Psyonix" hit impulse that
 // makes shots feel punchy (and depend on where on the car the ball is struck).
+// Extra speed on top of the normal hit: `boost` is a fraction of the ball's speed and
+// `add` a flat amount (RL uu/s); `recoil` pushes the car back off the ball.
+const SHOTS = {
+  red: { name: "RED", color: "#ff3b3b", glow: "rgba(255,59,59,", boost: 0.18, add: 150, recoil: 0 },
+  purple: { name: "PURPLE", color: "#b35cff", glow: "rgba(179,92,255,", boost: 0.12, add: 120, recoil: 320 },
+  gold: { name: "GOLD", color: "#ffc53d", glow: "rgba(255,197,61,", boost: 0.3, add: 220, recoil: 280 },
+};
+
 function collideCarBall(car, ball, game) {
   const R = ball.r;
   const n = car.nose(), u = car.up(), ht = car.halfT(), hl = P.CAR_LEN / 2;
@@ -488,13 +545,35 @@ function collideCarBall(car, ball, game) {
       hx -= 0.35 * f * n.x; hy -= 0.35 * f * n.y;
       hm = Math.hypot(hx, hy) || 1;
       hx /= hm; hy /= hm;
-      const rs = Math.min(rel, 3956);
-      const scale = rs <= 430 ? 0.65
-        : rs <= 1978 ? lerp(0.65, 0.55, (rs - 430) / 1548)
-        : lerp(0.55, 0.3, (rs - 1978) / 1978);
+      // RL's curve, in uu/s: 0.65 up to 500, falling to 0.55 at 2300 and 0.3 at 4600.
+      const rs = Math.min(rel, 4600 * V);
+      const scale = rs <= 500 * V ? 0.65
+        : rs <= 2300 * V ? lerp(0.65, 0.55, (rs - 500 * V) / (1800 * V))
+        : lerp(0.55, 0.3, (rs - 2300 * V) / (2300 * V));
       ball.vx += hx * rs * scale;
       ball.vy += hy * rs * scale;
-      power = clamp(rel / 2200, 0, 1);
+      power = clamp(rel / (2560 * V), 0, 1);
+
+      // Sideswipe's coloured shots: a flip striking with the nose (red), a flip striking
+      // with the tail (gold, the strongest), or a neutral double jump striking with the
+      // underside (purple). Purple and gold also knock the car back off the ball, which
+      // is what makes them the safe shots.
+      const face = cx >= hl - 1 ? "nose" : cx <= -hl + 1 ? "tail" : cy <= -ht + 1 ? "under" : null;
+      let shot = null;
+      if (car.dodgeT > 0 && face === "nose") shot = SHOTS.red;
+      else if (car.dodgeT > 0 && face === "tail") shot = SHOTS.gold;
+      else if (car.neutralJumpT > 0 && face === "under") shot = SHOTS.purple;
+      if (shot) {
+        const bs = Math.hypot(ball.vx, ball.vy) || 1;
+        const factor = (bs * (1 + shot.boost) + shot.add * V) / bs;
+        ball.vx *= factor;
+        ball.vy *= factor;
+        if (shot.recoil) car.applyImpulse(-nx * shot.recoil * V, -ny * shot.recoil * V, game.arena);
+        ball.shotT = 1.5;
+        power = Math.max(power, 0.85);
+        game.emit("shot", car, { shot, x: ball.x, y: ball.y });
+      }
+      ball.shot = shot; // a plain touch clears the glow from an earlier shot
     }
     // Contact friction spins the ball. The contact point sits at -R*n from the ball's
     // centre (n points car -> ball), so the spin's surface speed there is -w*R along t.
@@ -506,6 +585,7 @@ function collideCarBall(car, ball, game) {
   // Wheels against the ball: refills boost, and in the air restores the flip.
   if (-(nx * u.x + ny * u.y) > 0.6) {
     car.ballWheelContact = true;
+    car.wheelBallT = 0.15;
     if (!car.grounded && !car.flipAvailable && car.dodgeT <= 0) {
       car.flipAvailable = true;
       car.resetFlash = 1.1;
@@ -539,11 +619,11 @@ function collideCars(a, b, game) {
   const j = (1 + 0.3) * closing * 0.5;
   a.applyImpulse(-nx * j, -ny * j, game.arena);
   b.applyImpulse(nx * j, ny * j, game.arena);
-  if (closing > 450) {
+  if (closing > 520 * V) {
     const hitter = van > -vbn ? a : b, victim = hitter === a ? b : a;
     const sx = hitter === a ? nx : -nx, sy = hitter === a ? ny : -ny;
-    const extra = Math.min(closing, 1800) * 0.45;
+    const extra = Math.min(closing, 2100 * V) * 0.45;
     victim.applyImpulse(sx * extra, sy * extra - extra * 0.35, game.arena);
   }
-  game.emit("bump", a, { power: clamp(closing / 1500, 0, 1) });
+  game.emit("bump", a, { power: clamp(closing / (1740 * V), 0, 1) });
 }

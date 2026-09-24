@@ -372,6 +372,11 @@ const Render = (() => {
         burst(car.x, car.y, 10, "#ffe08a", 320, 0.3, 4, { drag: 5 });
         cam.shake = Math.max(cam.shake, 3 + e.power * 6);
         break;
+      case "shot":
+        ring(e.x, e.y, e.shot.color, 150, 0.45, 10);
+        burst(e.x, e.y, 26, e.shot.color, 650, 0.45, 6, { drag: 3.5 });
+        cam.shake = Math.max(cam.shake, 8);
+        break;
       case "flipReset":
         ring(car.x, car.y, TEAM[car.team].light, 80, 0.5, 7);
         burst(car.x, car.y, 14, TEAM[car.team].light, 220, 0.45, 4);
@@ -622,13 +627,16 @@ const Render = (() => {
     const R = ball.r;
     const x = lerp(ball.px, ball.x, alpha), y = lerp(ball.py, ball.y, alpha);
     const sp = ball.speed;
-    if (sp > 1400) {
-      ctx.strokeStyle = `rgba(255,255,255,${clamp((sp - 1400) / 3000, 0, 0.35)})`;
+    const shot = ball.shot;
+    const streakFrom = 1630 * P.SIZE * P.TIME;
+    if (sp > streakFrom || shot) {
+      const a = shot ? 0.55 * clamp(ball.shotT, 0, 1) : clamp((sp - streakFrom) / (3500 * P.SIZE * P.TIME), 0, 0.35);
+      ctx.strokeStyle = shot ? shot.glow + a + ")" : `rgba(255,255,255,${a})`;
       ctx.lineWidth = R * 1.4;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x - ball.vx * 0.05, y - ball.vy * 0.05);
+      ctx.lineTo(x - ball.vx * 0.07, y - ball.vy * 0.07);
       ctx.stroke();
     }
     if (ball.frozen) {
@@ -640,8 +648,8 @@ const Render = (() => {
 
     ctx.save();
     ctx.translate(x, y);
-    ctx.shadowColor = "rgba(190,215,255,0.55)";
-    ctx.shadowBlur = 18;
+    ctx.shadowColor = shot ? shot.color : "rgba(190,215,255,0.55)";
+    ctx.shadowBlur = shot ? 34 : 18;
     const base = ctx.createRadialGradient(-R * 0.3, -R * 0.35, R * 0.1, 0, 0, R);
     base.addColorStop(0, "#f4f6fa");
     base.addColorStop(0.6, "#b9c0cf");
@@ -678,6 +686,15 @@ const Render = (() => {
     shine.addColorStop(1, "rgba(0,0,20,0.35)");
     ctx.fillStyle = shine;
     ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+    if (shot) {
+      ctx.globalAlpha = clamp(ball.shotT, 0, 1);
+      ctx.fillStyle = shot.glow + "0.28)";
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+      ctx.strokeStyle = shot.color;
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(0, 0, R + 1, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 

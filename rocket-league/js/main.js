@@ -7,7 +7,7 @@ const MATCH_TIME = 120;
 const game = {
   state: "menu", // menu | countdown | play | goal | over
   paused: false,
-  mode: "duel", arenaId: "shortstack", level: "pro",
+  mode: "duel", arenaId: "shortstack", level: "pro", collisions: "off",
   arena: buildArena(ARENAS.shortstack),
   cars: [],
   ball: new Ball(),
@@ -41,7 +41,7 @@ function headingIntoGoal(b, side, A) {
   let x = b.x, y = b.y, vx = b.vx, vy = b.vy;
   const R = P.BALL_R;
   if (Math.abs(vx) < 150 || Math.sign(vx) !== side) return false;
-  for (let t = 0; t < 1.8; t += 0.02) {
+  for (let t = 0; t < 2.4 / P.TIME; t += 0.02) {
     vy += P.G * 0.02;
     x += vx * 0.02;
     y += vy * 0.02;
@@ -110,7 +110,7 @@ function kickoffReset(skipCountdown) {
 
 function scoreGoal(team) {
   const A = game.arena, ball = game.ball;
-  const kmh = Math.round((ball.speed / 1.35 / 0.637) * 0.036);
+  const kmh = Math.round((ball.speed / (P.SIZE * P.TIME)) * 0.036); // uu/s -> km/h
   // As in Rocket League, the goal goes to the scoring team's last toucher even if an
   // opponent deflected it in; it's only an own goal if nobody on that team touched it.
   const scorer = game.teamTouch[team];
@@ -124,7 +124,7 @@ function scoreGoal(team) {
     const dx = c.x - ball.x, dy = c.y - ball.y;
     const d = Math.hypot(dx, dy) || 1;
     if (d < 560) {
-      const f = (1 - d / 560) * 1500;
+      const f = (1 - d / 560) * 1750 * P.SIZE * P.TIME;
       c.applyImpulse((dx / d) * f, (dy / d) * f - f * 0.25, A);
     }
   }
@@ -198,8 +198,11 @@ function step(h) {
     ball.update(h, game);
     for (const c of game.cars) collideCarBall(c, ball, game);
   }
-  for (let i = 0; i < game.cars.length; i++) {
-    for (let j = i + 1; j < game.cars.length; j++) collideCars(game.cars[i], game.cars[j], game);
+  // Sideswipe cars drive through each other; bumping is an optional mutator.
+  if (game.collisions === "on") {
+    for (let i = 0; i < game.cars.length; i++) {
+      for (let j = i + 1; j < game.cars.length; j++) collideCars(game.cars[i], game.cars[j], game);
+    }
   }
 
   if (game.state === "play") {
@@ -348,7 +351,7 @@ const UI = (() => {
   }
 
   function savePrefs() {
-    try { localStorage.setItem("sideswipe-prefs", JSON.stringify({ mode: game.mode, arenaId: game.arenaId, level: game.level })); } catch (_) { /* storage unavailable */ }
+    try { localStorage.setItem("sideswipe-prefs", JSON.stringify({ mode: game.mode, arenaId: game.arenaId, level: game.level, collisions: game.collisions })); } catch (_) { /* storage unavailable */ }
   }
 
   function loadPrefs() {
@@ -357,6 +360,7 @@ const UI = (() => {
       if (MODES[p.mode]) game.mode = p.mode;
       if (ARENAS[p.arenaId]) game.arenaId = p.arenaId;
       if (BOT_LEVELS[p.level]) game.level = p.level;
+      if (p.collisions === "on" || p.collisions === "off") game.collisions = p.collisions;
     } catch (_) { /* storage unavailable */ }
   }
 
