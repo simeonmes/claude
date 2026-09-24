@@ -39,9 +39,11 @@ const OFF = {
 };
 
 const GRAVITY = 1500;
-const DRIVE_ACCEL = 2600;
+const DRIVE_ACCEL = 1800;
 const MAX_DRIVE_SPEED = 560;
-const SURFACE_DRAG = 0.35; // fractional velocity bleed per second when coasting
+// Derived so plain driving asymptotically settles at MAX_DRIVE_SPEED (see the
+// continuous drag applied in Car.update) instead of needing a hard speed clamp.
+const DRIVE_DRAG = DRIVE_ACCEL / MAX_DRIVE_SPEED;
 const AIR_ROTATE_SPEED = 6.2;
 const AIR_DRAG = 0.06;
 const JUMP_SPEED = 640;
@@ -342,18 +344,14 @@ class Car {
     this.jumpHeld = input.jump;
 
     if (this.mode === "surface") {
-      let accel = 0;
-      if (wantRight) accel += DRIVE_ACCEL;
-      if (wantLeft) accel -= DRIVE_ACCEL;
-      this.ds += accel * dt;
+      // s increases clockwise around the arena, which runs leftward along the floor
+      // (the surface most play happens on) — so the right-drive key must DECREASE s
+      // there, not increase it, or "right" would visibly drive the car left.
+      if (wantRight) this.ds -= DRIVE_ACCEL * dt;
+      if (wantLeft) this.ds += DRIVE_ACCEL * dt;
 
-      // coast drag when no input
-      if (!wantLeft && !wantRight) {
-        const drag = SURFACE_DRAG * dt * 4;
-        this.ds *= Math.max(0, 1 - drag);
-      }
-
-      if (input.boost && this.boost > 0) {
+      const boosting = input.boost && this.boost > 0;
+      if (boosting) {
         const dir = this.ds >= 0 ? 1 : -1;
         this.ds += BOOST_ACCEL * dt * (dir || 1);
         this.boost = Math.max(0, this.boost - BOOST_DRAIN * dt);
@@ -365,7 +363,13 @@ class Car {
         this.boost = Math.min(BOOST_MAX, this.boost + BOOST_REGEN * dt);
       }
 
-      this.ds = clamp(this.ds, -MAX_DRIVE_SPEED * 1.6, MAX_DRIVE_SPEED * 1.6);
+      // Continuous speed-proportional drag (always on, not just when coasting) gives
+      // driving a natural top speed instead of an instant hard clamp: it settles near
+      // MAX_DRIVE_SPEED under plain input, and boosting settles noticeably higher.
+      // A hard clamp here would also snap speed down the instant boost runs out;
+      // this decays smoothly instead.
+      this.ds /= 1 + DRIVE_DRAG * dt;
+
       // gravity's tangential pull (slower going "uphill" toward ceiling)
       const surf0 = surfaceAt(this.s);
       // gravity is (0, +GRAVITY); its component along the tangent is tangent.y * GRAVITY,
@@ -563,8 +567,11 @@ function aiInput(car, ball, ownGoalSide) {
   const input = { left: false, right: false, jump: false, boost: false };
   const deadzone = 8;
   if (car.mode === "surface") {
-    if (diff > deadzone) input.right = true;
-    else if (diff < -deadzone) input.left = true;
+    // diff > 0 means the target is ahead in the +s (increasing s) direction, which
+    // is the LEFT key's effect now (see the note in Car.update on why right/left
+    // had to be swapped relative to raw s).
+    if (diff > deadzone) input.left = true;
+    else if (diff < -deadzone) input.right = true;
 
     if (Math.abs(diff) > 140 && car.boost > 15) input.boost = true;
 
