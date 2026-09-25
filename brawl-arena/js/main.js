@@ -70,7 +70,7 @@ const UI = {
       b.hidden = MAPS[b.dataset.value].mode !== p.mode;
     }
     for (const el of document.querySelectorAll("[data-mode]")) el.hidden = el.dataset.mode !== p.mode;
-    this.$("modeSub").textContent = MODES[p.mode].sub;
+    if (this.$("modeSub")) this.$("modeSub").textContent = MODES[p.mode].sub;
     for (const b of document.querySelectorAll('.chips[data-group="level"] button')) b.classList.toggle("on", b.dataset.value === p.level);
     this.$("bdesc").innerHTML = `<b>${d.name}</b>: ${d.desc}<br><span class="super">${d.superDesc}</span>`;
     this.$("mapBlurb").textContent = MAPS[p.map].blurb;
