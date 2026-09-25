@@ -136,7 +136,7 @@ button.secondary {
   font-size: 15px;
 }
 
-button.link {
+button.link, a.link {
   cursor: pointer;
   background: none;
   border: none;
