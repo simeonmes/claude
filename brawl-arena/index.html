@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1d3240">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Brawl Arena</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <div class="logo">
+      <span class="t1">BRAWL</span><span class="t2">ARENA</span>
+      <span class="sub">3v3 Gem Grab</span>
+    </div>
+
+    <div class="label">Pick your brawler</div>
+    <div id="brawlers" class="brawlers"></div>
+    <div id="bdesc" class="bdesc"></div>
+
+    <div class="row">
+      <div class="section">
+        <div class="label">Map</div>
+        <div class="chips" data-group="map"></div>
+        <div id="mapBlurb" class="blurb"></div>
+      </div>
+      <div class="section">
+        <div class="label">Bots</div>
+        <div class="chips" data-group="level"></div>
+      </div>
+    </div>
+
+    <button id="play" class="play">PLAY</button>
+
+    <details class="howto">
+      <summary>How to play</summary>
+      <div class="cols">
+        <div>
+          <h4>Goal</h4>
+          <p>Gems pop out of the mine in the middle every 7 seconds. Walk over them to pick them up.</p>
+          <p>When your team holds <b>10 gems</b> (and more than the enemy), a <b>15 second</b> countdown starts. Survive it to win.</p>
+          <p>If you're defeated you drop every gem you carry, so the carrier should play safe.</p>
+        </div>
+        <div>
+          <h4>Keyboard &amp; mouse</h4>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows: move</p>
+          <p>Mouse: aim · <b>Left click</b>: attack</p>
+          <p><b>Right click</b> or <kbd>E</kbd>: super (when the yellow dial is full)</p>
+          <p><kbd>Space</kbd>: quick-fire at the nearest enemy · <kbd>Q</kbd>: quick super</p>
+          <p><kbd>Esc</kbd> pause · <kbd>M</kbd> mute</p>
+        </div>
+        <div>
+          <h4>Touch &amp; gamepad</h4>
+          <p>Left thumb moves. Drag the red button to aim and let go to attack, or tap it to quick-fire. The yellow button is your super.</p>
+          <p>Gamepad: left stick moves, right stick aims, RT attack, LT super, A/B quick-fire.</p>
+          <h4>Tips</h4>
+          <p>You have 3 ammo that reload over time. Hitting enemies charges your super. Stay out of fights for 3 seconds to heal.</p>
+          <p>Bushes hide you from enemies unless they get close or you attack.</p>
+        </div>
+      </div>
+    </details>
+
+    <div class="foot">
+      <a class="link" href="../index.html">← All games</a>
+      <button id="mute" class="link">Sound: On</button>
+      <span>Fan-made. Not affiliated with Supercell.</span>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="card small">
+    <h2>PAUSED</h2>
+    <button id="resume" class="play">RESUME</button>
+    <button id="restart" class="secondary">Restart match</button>
+    <button id="quit" class="secondary">Main menu</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="card">
+    <h2 id="overTitle">VICTORY!</h2>
+    <div id="overScore" class="final"></div>
+    <div class="tablewrap"><table id="overStats" class="stats"></table></div>
+    <button id="again" class="play">PLAY AGAIN</button>
+    <button id="overMenu" class="secondary">Main menu</button>
+  </div>
+</div>
+
+<div id="rotate" class="rotate"><div>↻</div>Turn your phone sideways to play</div>
+
+<script src="js/maps.js"></script>
+<script src="js/brawlers.js"></script>
+<script src="js/world.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/input.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
