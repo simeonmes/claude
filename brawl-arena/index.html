@@ -16,7 +16,7 @@
   <div class="card">
     <div class="logo">
       <span class="t1">BRAWL</span><span class="t2">ARENA</span>
-      <span class="sub">3v3 Gem Grab</span>
+      <span class="sub" id="modeSub">3v3 Gem Grab</span>
     </div>
 
     <div class="label">Pick your brawler</div>
@@ -24,6 +24,10 @@
     <div id="bdesc" class="bdesc"></div>
 
     <div class="row">
+      <div class="section">
+        <div class="label">Mode</div>
+        <div class="chips" data-group="mode"></div>
+      </div>
       <div class="section">
         <div class="label">Map</div>
         <div class="chips" data-group="map"></div>
@@ -40,11 +44,17 @@
     <details class="howto">
       <summary>How to play</summary>
       <div class="cols">
-        <div>
-          <h4>Goal</h4>
+        <div data-mode="gem">
+          <h4>Gem Grab</h4>
           <p>Gems pop out of the mine in the middle every 7 seconds. Walk over them to pick them up.</p>
           <p>When your team holds <b>10 gems</b> (and more than the enemy), a <b>15 second</b> countdown starts. Survive it to win.</p>
           <p>If you're defeated you drop every gem you carry, so the carrier should play safe.</p>
+        </div>
+        <div data-mode="ball" hidden>
+          <h4>Brawl Ball</h4>
+          <p>Walk over the ball to pick it up. While you carry it, <b>attack kicks it</b> and <b>super passes it</b> with a lob over walls. You can't shoot while you hold the ball.</p>
+          <p>Kick or carry it into the enemy goal. <b>First to 2 goals wins.</b> After a goal everyone goes back to their spawn for a new kickoff.</p>
+          <p>Getting defeated or knocked back makes you drop the ball. If it's tied when the <b>2:30</b> clock runs out, overtime starts and the next goal wins.</p>
         </div>
         <div>
           <h4>Keyboard &amp; mouse</h4>

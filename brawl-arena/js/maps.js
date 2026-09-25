@@ -5,6 +5,7 @@
 //   .  floor        #  stone wall (blocks moving and shots; supers can smash it)
 //   C  crate        ~  water (blocks moving, shots fly over)
 //   "  bush (hides you)   M  gem mine   2  red spawn (becomes 1, blue, when mirrored)
+//   B  arena fence (unbreakable)   G  goal (Brawl Ball)   O  ball spot (Brawl Ball)
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -17,9 +18,15 @@ const angDiff = (a, b) => {
   return d;
 };
 
+const MODES = {
+  gem: { name: "Gem Grab", sub: "3v3 Gem Grab" },
+  ball: { name: "Brawl Ball", sub: "3v3 Brawl Ball" },
+};
+
 const MAPS = {
   canyon: {
     name: "Gem Canyon",
+    mode: "gem",
     blurb: "Open middle with water on the flanks. Good for long-range brawlers.",
     top: [
       '~~~.....2.2.2.....~~~',
@@ -43,6 +50,7 @@ const MAPS = {
   },
   grove: {
     name: "Hidden Grove",
+    mode: "gem",
     blurb: "Thick bushes everywhere. Great for ambushes and close-range brawlers.",
     top: [
       'C.......2.2.2.......C',
@@ -64,10 +72,59 @@ const MAPS = {
     ],
     mid: '..........M..........',
   },
+  court: {
+    name: "Center Court",
+    mode: "ball",
+    blurb: "Open pitch with cover near each goal. Fast passing, long shots.",
+    top: [
+      'BBBBBBBBGGGGGBBBBBBBB',
+      '"".................""',
+      '"""..............."""',
+      '.......2..2..2.......',
+      '.....................',
+      '..###...........###..',
+      '.....................',
+      '.........CCC.........',
+      '.....................',
+      '"""....#.....#...."""',
+      '"""....#.....#...."""',
+      '.....................',
+      '....##.........##....',
+      '.....................',
+      '.......#.....#.......',
+      '.....................',
+    ],
+    mid: '""........O........""',
+  },
+  pinball: {
+    name: "Pinball Park",
+    mode: "ball",
+    blurb: "Ponds split the lanes and bushes hide the middle. Bounce shots off the walls.",
+    top: [
+      'BBBBBBBBGGGGGBBBBBBBB',
+      '.....................',
+      '..##.............##..',
+      '..#....2..2..2....#..',
+      '.....................',
+      '""".....#...#....."""',
+      '"""..............."""',
+      '......~~~...~~~......',
+      '......~~~...~~~......',
+      '..C...............C..',
+      '..C....""...""....C..',
+      '.......""..."".......',
+      '~~.................~~',
+      '~~.....#.....#.....~~',
+      '.......#.....#.......',
+      '...""...........""...',
+    ],
+    mid: '.....""...O..."".....',
+  },
 };
 
-const SOLID = new Set(["#", "C", "~"]);   // blocks movement
-const WALL = new Set(["#", "C"]);         // blocks shots, breakable
+const SOLID = new Set(["#", "C", "~", "B"]);   // blocks movement
+const WALL = new Set(["#", "C", "B"]);         // blocks shots
+const BREAKABLE = new Set(["#", "C"]);         // supers can smash these
 
 function buildMap(id) {
   const def = MAPS[id];
@@ -75,7 +132,9 @@ function buildMap(id) {
   const rows = [...def.top, def.mid, ...def.top.slice().reverse().map(flip)];
   const w = 21, h = rows.length;
   for (const r of rows) if (r.length !== w) throw new Error(`map ${id}: row "${r}" is ${r.length} wide`);
-  const map = { id, name: def.name, w, h, tiles: rows.map((r) => r.split("")), spawns: [[], []], mine: null, version: 0 };
+  const map = { id, name: def.name, mode: def.mode, w, h, tiles: rows.map((r) => r.split("")), spawns: [[], []],
+    mine: null, ballSpot: null, goals: [null, null], center: { x: w / 2, y: h / 2 }, version: 0 };
+  const goalTiles = [[], []];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const c = map.tiles[y][x];
@@ -85,8 +144,23 @@ function buildMap(id) {
       } else if (c === "M") {
         map.mine = { x: x + 0.5, y: y + 0.5 };
         map.tiles[y][x] = ".";
+      } else if (c === "O") {
+        map.ballSpot = { x: x + 0.5, y: y + 0.5 };
+        map.tiles[y][x] = ".";
+      } else if (c === "G") {
+        goalTiles[y < h / 2 ? 1 : 0].push({ x, y });
       }
     }
+  }
+  // goals[t] is the goal team t defends: blue (0) at the bottom, red (1) at the top.
+  for (let t = 0; t < 2; t++) {
+    const g = goalTiles[t];
+    if (!g.length) continue;
+    const x0 = Math.min(...g.map((p) => p.x)), x1 = Math.max(...g.map((p) => p.x)) + 1;
+    const ys = g.map((p) => p.y), y0 = Math.min(...ys), y1 = Math.max(...ys) + 1;
+    const out = t === 0 ? -1 : 1;                     // direction from the goal into the pitch
+    const line = t === 0 ? y0 : y1;                   // goal line
+    map.goals[t] = { x0, x1, y0, y1, line, out, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
   }
   // Blue spawns listed left to right like red's.
   map.spawns[0].sort((a, b) => a.x - b.x);
@@ -101,6 +175,7 @@ function tileAt(map, x, y) {
 const solidAt = (map, x, y) => { const c = tileAt(map, x, y); return c === "X" || SOLID.has(c); };
 const wallAt = (map, x, y) => WALL.has(tileAt(map, x, y));
 const bushAt = (map, x, y) => tileAt(map, x, y) === '"';
+const goalAt = (map, x, y) => tileAt(map, x, y) === "G";
 
 // Clear line for shots between two points (walls block, water doesn't).
 function shotClear(map, x0, y0, x1, y1) {

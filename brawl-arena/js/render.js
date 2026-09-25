@@ -1,5 +1,6 @@
 "use strict";
-// Top-down renderer with fake-3D walls, bushes that hide brawlers, and the HUD.
+// Top-down renderer with fake-3D walls, bushes that hide brawlers, goals and the ball,
+// and the HUD.
 
 const R = { canvas: null, ctx: null, W: 0, H: 0, dpr: 1, cam: { x: 10.5, y: 16.5, s: 40, init: false }, aim: null };
 const TEAM_COLORS = ["#3d8bff", "#ff4b4b"];
@@ -26,10 +27,12 @@ function updateCamera(dt) {
   c.s = Math.min(R.W / 22, R.H / 14.5);
   const visW = R.W / c.s, visH = R.H / c.s;
   const p = G.player;
-  let fx = m.mine.x, fy = m.mine.y;
+  let fx = (m.mine || m.center).x, fy = (m.mine || m.center).y;
   if (p) { fx = p.x; fy = p.y + (p.team === 0 ? -1.3 : 1.3); }
   const tx = visW >= m.w + 1 ? m.w / 2 : clamp(fx, visW / 2 - 0.5, m.w - visW / 2 + 0.5);
-  const ty = visH >= m.h + 2 ? m.h / 2 : clamp(fy, visH / 2 - 1, m.h - visH / 2 + 1);
+  // Brawl Ball leaves extra room at the ends so the score panel doesn't cover a goal.
+  const pad = m.mode === "ball" ? 2 : 1;
+  const ty = visH >= m.h + 2 * pad ? m.h / 2 : clamp(fy, visH / 2 - pad, m.h - visH / 2 + pad);
   if (!c.init) { c.x = tx; c.y = ty; c.init = true; }
   const k = 1 - Math.exp(-7 * dt);
   c.x += (tx - c.x) * k;
@@ -78,6 +81,7 @@ function drawGame(dt) {
 
   drawTags(ctx);
   drawTexts(ctx);
+  drawBallPointer(ctx);
   drawHUD(ctx);
 }
 
@@ -92,10 +96,12 @@ function drawFloor(ctx, m, v) {
   ctx.fillStyle = "#e0c28a";
   for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0 + ((v.x0 + y) & 1); x <= v.x1; x += 2) ctx.fillRect(x, y, 1, 1);
 
+  if (m.mode === "ball") drawPitch(ctx, m);
+
   // Spawn pads.
   for (let t = 0; t < 2; t++) {
     const sp = m.spawns[t];
-    const py = t === 0 ? m.h - 2.3 : 0.2;
+    const py = clamp(sp[0].y - 1.05, 0.2, m.h - 2.3);
     ctx.fillStyle = t === 0 ? "rgba(61,139,255,0.22)" : "rgba(255,75,75,0.22)";
     ctx.strokeStyle = t === 0 ? "rgba(61,139,255,0.5)" : "rgba(255,75,75,0.5)";
     ctx.lineWidth = 0.06;
@@ -105,13 +111,15 @@ function drawFloor(ctx, m, v) {
 
   // Gem mine.
   const mn = m.mine;
-  ctx.fillStyle = "#4b3560";
-  ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.75, 0, TAU); ctx.fill();
-  ctx.fillStyle = "#281a36";
-  ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.52, 0, TAU); ctx.fill();
-  const pulse = 1 - G.mineT / GEM_SPAWN_T;
-  ctx.strokeStyle = "#c07cff"; ctx.lineWidth = 0.09;
-  ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.64, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(pulse, 0, 1)); ctx.stroke();
+  if (mn) {
+    ctx.fillStyle = "#4b3560";
+    ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.75, 0, TAU); ctx.fill();
+    ctx.fillStyle = "#281a36";
+    ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.52, 0, TAU); ctx.fill();
+    const pulse = 1 - G.mineT / GEM_SPAWN_T;
+    ctx.strokeStyle = "#c07cff"; ctx.lineWidth = 0.09;
+    ctx.beginPath(); ctx.arc(mn.x, mn.y, 0.64, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(pulse, 0, 1)); ctx.stroke();
+  }
 
   // Water.
   for (let y = v.y0; y <= v.y1; y++) {
@@ -134,13 +142,60 @@ function drawFloor(ctx, m, v) {
   // Wall shadows.
   ctx.fillStyle = "rgba(60,35,10,0.2)";
   for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0; x <= v.x1; x++) {
-    if (WALL.has(m.tiles[y][x])) ctx.fillRect(x + 0.1, y + 0.1, 1, 1);
+    if (BREAKABLE.has(m.tiles[y][x])) ctx.fillRect(x + 0.1, y + 0.1, 1, 1);
+  }
+
+  // Arena fence and goals.
+  for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0; x <= v.x1; x++) {
+    if (m.tiles[y][x] !== "B") continue;
+    ctx.fillStyle = "#6b4a2b";
+    ctx.fillRect(x - 0.01, y - 0.01, 1.02, 1.02);
+    ctx.fillStyle = "#56391f";
+    ctx.fillRect(x + 0.1 + hash(x, y) * 0.3, y + 0.2 + hash(x, y, 2) * 0.4, 0.28, 0.14);
+  }
+  for (let t = 0; t < 2; t++) if (m.goals[t]) drawGoal(ctx, m.goals[t], t);
+}
+
+// Pitch markings for Brawl Ball: halfway line, centre circle and the boxes.
+function drawPitch(ctx, m) {
+  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.lineWidth = 0.08;
+  const c = m.ballSpot;
+  ctx.beginPath(); ctx.moveTo(0.2, c.y); ctx.lineTo(m.w - 0.2, c.y); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c.x, c.y, 2.2, 0, TAU); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.beginPath(); ctx.arc(c.x, c.y, 0.14, 0, TAU); ctx.fill();
+  for (const g of m.goals) {
+    if (!g) continue;
+    const bw = g.x1 - g.x0 + 4, bh = 3;
+    const y = g.out > 0 ? g.line : g.line - bh;
+    ctx.strokeRect(g.cx - bw / 2, y, bw, bh);
+  }
+}
+
+// A net in the defending team's colour, with white posts at the goal mouth.
+function drawGoal(ctx, g, team) {
+  const col = team === 0 ? "61,139,255" : "255,75,75";
+  ctx.fillStyle = `rgba(${col},0.35)`;
+  ctx.fillRect(g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0);
+  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.lineWidth = 0.03;
+  ctx.beginPath();
+  for (let x = g.x0; x <= g.x1 + 1e-6; x += 0.25) { ctx.moveTo(x, g.y0); ctx.lineTo(x, g.y1); }
+  for (let y = g.y0; y <= g.y1 + 1e-6; y += 0.25) { ctx.moveTo(g.x0, y); ctx.lineTo(g.x1, y); }
+  ctx.stroke();
+  // Goal line and posts.
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 0.1;
+  ctx.beginPath(); ctx.moveTo(g.x0, g.line); ctx.lineTo(g.x1, g.line); ctx.stroke();
+  ctx.fillStyle = "#f4f4f4"; ctx.strokeStyle = "#333"; ctx.lineWidth = 0.04;
+  for (const x of [g.x0, g.x1]) {
+    ctx.beginPath(); ctx.arc(x, g.line, 0.2, 0, TAU); ctx.fill(); ctx.stroke();
   }
 }
 
 function drawWall(ctx, m, x, y) {
   const c = m.tiles[y][x];
-  const below = y + 1 < m.h && WALL.has(m.tiles[y + 1][x]);
+  const below = y + 1 < m.h && BREAKABLE.has(m.tiles[y + 1][x]);
   const crate = c === "C";
   if (!below) {
     ctx.fillStyle = crate ? "#96622c" : "#8d6443";
@@ -168,9 +223,10 @@ function drawWall(ctx, m, x, y) {
 function drawLayer(ctx, m, v) {
   const items = [];
   for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0; x <= v.x1; x++) {
-    if (WALL.has(m.tiles[y][x])) items.push({ y: y + 1, wall: true, x, ty: y });
+    if (BREAKABLE.has(m.tiles[y][x])) items.push({ y: y + 1, wall: true, x, ty: y });
   }
   for (const g of G.gems) items.push({ y: g.y, gem: g });
+  if (G.ball) items.push({ y: G.ball.y + (G.ball.holder ? 0.05 : 0), ball: G.ball });
   for (const b of G.brawlers) {
     if (b.dead || !visibleTo(0, b)) continue;
     items.push({ y: b.y + b.r * 0.6, b });
@@ -179,6 +235,7 @@ function drawLayer(ctx, m, v) {
   for (const it of items) {
     if (it.wall) drawWall(ctx, m, it.x, it.ty);
     else if (it.gem) drawGemWorld(ctx, it.gem);
+    else if (it.ball) drawBall(ctx, it.ball);
     else drawBrawler(ctx, it.b, 1);
   }
 }
@@ -217,6 +274,34 @@ function drawGemWorld(ctx, g) {
   ctx.strokeStyle = "#4b1a7a"; ctx.lineWidth = 0.04; ctx.stroke();
   ctx.fillStyle = "#e6c8ff";
   ctx.beginPath(); ctx.moveTo(g.x, y - 0.2); ctx.lineTo(g.x + 0.08, y - 0.07); ctx.lineTo(g.x, y + 0.02); ctx.closePath(); ctx.fill();
+}
+
+function drawBall(ctx, ball) {
+  const x = ball.x, y = ball.y, z = ball.z, r = BALL_R + 0.03;
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath(); ctx.ellipse(x, y + 0.08, r / (1 + z * 0.4), r * 0.45 / (1 + z * 0.4), 0, 0, TAU); ctx.fill();
+  const cy = y - r * 0.7 - z;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, cy, r, 0, TAU);
+  ctx.fillStyle = "#fafafa"; ctx.fill();
+  ctx.clip();
+  // Patches roll with the ball.
+  ctx.fillStyle = "#26262e";
+  for (let k = 0; k < 5; k++) {
+    const a = k * TAU / 5 + ball.spin * 0.35, ph = ((ball.spin * 0.25 + k * 0.4) % 2) - 1;
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.75, cy + ph * r * 0.9, r * 0.28, 0, TAU); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x + Math.sin(ball.spin) * r * 0.2, cy, r * 0.26, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "#1b1b1b"; ctx.lineWidth = 0.035;
+  ctx.beginPath(); ctx.arc(x, cy, r, 0, TAU); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.beginPath(); ctx.arc(x - r * 0.35, cy - r * 0.4, r * 0.18, 0, TAU); ctx.fill();
+  // Landing spot for a lobbed pass.
+  if (ball.lob) {
+    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 0.05;
+    ctx.beginPath(); ctx.arc(ball.lob.x1, ball.lob.y1, 0.4, 0, TAU); ctx.stroke();
+  }
 }
 
 function drawBrawler(ctx, b, alpha) {
@@ -406,9 +491,11 @@ function drawFx(ctx) {
 function drawAim(ctx) {
   const p = G.player, a = R.aim;
   if (!p || p.dead || !a || G.state !== "play") return;
-  const shape = a.kind === "sup" ? p.def.superAim : p.def.aim;
-  const ready = a.kind === "sup" ? p.superC >= 1 : p.ammo >= 1;
-  const col = a.kind === "sup" ? (ready ? "255,205,60" : "160,160,160") : (ready ? "255,255,255" : "255,120,120");
+  const carrying = G.ball && G.ball.holder === p;
+  const shape = aimShapes(p)[a.kind];
+  const ready = carrying || (a.kind === "sup" ? p.superC >= 1 : p.ammo >= 1);
+  const col = carrying ? (a.kind === "sup" ? "140,230,140" : "255,255,255")
+    : a.kind === "sup" ? (ready ? "255,205,60" : "160,160,160") : (ready ? "255,255,255" : "255,120,120");
   const strong = a.strong ? 1 : 0.55;
   ctx.fillStyle = `rgba(${col},${0.22 * strong})`;
   ctx.strokeStyle = `rgba(${col},${0.55 * strong})`;
@@ -510,12 +597,13 @@ function drawHUD(ctx) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  // Gem score.
+  // Score: gems, or goals and the match clock.
   const pw = Math.min(260, W * 0.5), ph = Math.max(34, u * 0.08), px = W / 2 - pw / 2, py = 8;
   ctx.fillStyle = "rgba(10,14,30,0.75)";
   roundRect(ctx, px, py, pw, ph, ph / 2); ctx.fill();
   const fs = Math.round(ph * 0.55);
-  for (let t = 0; t < 2; t++) {
+  if (G.mode === "ball") drawBallScore(ctx, px, py, pw, ph, fs);
+  else for (let t = 0; t < 2; t++) {
     const cx = W / 2 + (t === 0 ? -pw * 0.25 : pw * 0.25), cy = py + ph / 2;
     ctx.fillStyle = TEAM_COLORS[t];
     roundRect(ctx, cx - pw * 0.22, py + 4, pw * 0.44, ph - 8, (ph - 8) / 2); ctx.fill();
@@ -557,21 +645,75 @@ function drawHUD(ctx) {
     bigText(ctx, n > 0 ? String(n) : "", W / 2, H * 0.42, u * 0.16, "#fff");
     ctx.font = `800 ${Math.round(u * 0.035)}px system-ui, sans-serif`;
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.fillStyle = "#e6d3ff";
-    const sub = "GEM GRAB: grab 10 gems and hold them for 15 seconds";
+    const sub = G.mode === "ball"
+      ? (G.kickoffs ? `KICKOFF  ·  ${G.score[0]} - ${G.score[1]}` : "BRAWL BALL: first team to score 2 goals wins")
+      : "GEM GRAB: grab 10 gems and hold them for 15 seconds";
     ctx.strokeText(sub, W / 2, H * 0.56); ctx.fillText(sub, W / 2, H * 0.56);
-  } else if (G.time < 3.8 && G.state === "play") {
+  } else if (G.time < 3.8 && G.state === "play" && !G.kickoffs) {
     bigText(ctx, "BRAWL!", W / 2, H * 0.42, u * 0.13, "#ffd23f");
   }
-  if (p && p.dead && G.state === "play") {
+  if (G.goalT > 0 && G.lastGoal) {
+    const g = G.lastGoal, ours = g.team === 0;
+    bigText(ctx, "GOAL!", W / 2, H * 0.4, u * 0.15, ours ? "#7fc1ff" : "#ff7a7a");
+    const who = g.own ? "Own goal!" : g.scorer ? `${g.scorer.name} (${g.scorer.def.name}) scores` : "";
+    ctx.font = `800 ${Math.round(u * 0.04)}px system-ui, sans-serif`;
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.fillStyle = "#fff";
+    ctx.strokeText(who, W / 2, H * 0.53); ctx.fillText(who, W / 2, H * 0.53);
+  }
+  if (p && p.dead && G.state === "play" && G.goalT <= 0) {
     bigText(ctx, `Respawning in ${Math.ceil(p.respawnT)}`, W / 2, H * 0.45, u * 0.06, "#fff");
   }
   if (G.state === "ending") {
-    bigText(ctx, G.winner === 0 ? "VICTORY!" : "DEFEAT", W / 2, H * 0.42, u * 0.14, G.winner === 0 ? "#ffd23f" : "#ff6b6b");
+    if (G.draw) bigText(ctx, "DRAW", W / 2, H * 0.42, u * 0.14, "#e6e6e6");
+    else bigText(ctx, G.winner === 0 ? "VICTORY!" : "DEFEAT", W / 2, H * 0.42, u * 0.14, G.winner === 0 ? "#ffd23f" : "#ff6b6b");
   }
 
   if (!p || G.state !== "play") return;
   if (Input.touchMode) drawTouchControls(ctx, p);
   else drawDesktopSuper(ctx, p);
+}
+
+function drawBallScore(ctx, px, py, pw, ph, fs) {
+  const W = R.W, cy = py + ph / 2;
+  for (let t = 0; t < 2; t++) {
+    const cx = W / 2 + (t === 0 ? -pw * 0.32 : pw * 0.32);
+    ctx.fillStyle = TEAM_COLORS[t];
+    roundRect(ctx, cx - pw * 0.15, py + 4, pw * 0.3, ph - 8, (ph - 8) / 2); ctx.fill();
+    ctx.font = `900 ${fs}px system-ui, sans-serif`;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(String(G.score[t]), cx, cy + 1);
+  }
+  const secs = Math.max(0, Math.ceil(G.clock)), clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const hurry = G.overtime || secs <= 10;
+  ctx.font = `900 ${Math.round(fs * 0.85)}px system-ui, sans-serif`;
+  ctx.fillStyle = hurry ? "#ffb347" : "#fff";
+  ctx.fillText(clock, W / 2, cy + 1);
+  if (G.overtime && G.state === "play") {
+    ctx.font = `900 ${Math.round(fs * 0.7)}px system-ui, sans-serif`;
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.fillStyle = "#ffb347";
+    const text = "OVERTIME · NEXT GOAL WINS";
+    ctx.strokeText(text, W / 2, py + ph + fs * 0.8); ctx.fillText(text, W / 2, py + ph + fs * 0.8);
+  }
+}
+
+// Arrow at the screen edge pointing at the ball when it's off camera.
+function drawBallPointer(ctx) {
+  const ball = G.ball;
+  if (!ball || G.state !== "play") return;
+  const p = toScreen(ball.x, ball.y - ball.z), m = 26;
+  if (p.x > m && p.x < R.W - m && p.y > m && p.y < R.H - m) return;
+  const x = clamp(p.x, m, R.W - m), y = clamp(p.y, m + Math.max(34, Math.min(R.W, R.H) * 0.08) + 30, R.H - m);
+  const a = Math.atan2(p.y - R.H / 2, p.x - R.W / 2);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "rgba(10,14,30,0.7)";
+  ctx.beginPath(); ctx.arc(0, 0, 15, 0, TAU); ctx.fill();
+  ctx.fillStyle = "#fafafa"; ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 8, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.rotate(a);
+  ctx.fillStyle = ball.holder ? TEAM_COLORS[ball.holder.team] : "#fff";
+  ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(14, -6); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
+  ctx.restore();
 }
 
 function bigText(ctx, text, x, y, size, color) {
@@ -586,12 +728,14 @@ function bigText(ctx, text, x, y, size, color) {
 function drawDesktopSuper(ctx, p) {
   const u = Math.min(R.W, R.H), r = u * 0.055, x = R.W - r * 1.8, y = R.H - r * 1.8;
   superDial(ctx, x, y, r, p);
+  const carrying = G.ball && G.ball.holder === p;
   ctx.font = `800 ${Math.round(r * 0.32)}px system-ui, sans-serif`;
-  ctx.fillStyle = p.superC >= 1 ? "#ffd23f" : "#aab";
-  ctx.fillText(p.superC >= 1 ? "E / RIGHT-CLICK" : "SUPER", x, y + r * 1.45);
+  ctx.fillStyle = carrying ? "#9be89b" : p.superC >= 1 ? "#ffd23f" : "#aab";
+  ctx.fillText(carrying ? "PASS (E)" : p.superC >= 1 ? "E / RIGHT-CLICK" : "SUPER", x, y + r * 1.45);
 }
 
 function superDial(ctx, x, y, r, p) {
+  if (G.ball && G.ball.holder === p) { passDial(ctx, x, y, r); return; }
   const ready = p.superC >= 1;
   ctx.fillStyle = ready ? "#ffc526" : "rgba(40,40,50,0.75)";
   ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
@@ -612,6 +756,18 @@ function superDial(ctx, x, y, r, p) {
   ctx.closePath(); ctx.fill();
 }
 
+// While carrying the ball the super button becomes a pass button.
+function passDial(ctx, x, y, r) {
+  ctx.fillStyle = "#4fbf5a";
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = r * 0.08;
+  ctx.beginPath(); ctx.arc(x, y, r * 1.06, 0, TAU); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#1c4d22"; ctx.lineWidth = r * 0.08;
+  ctx.beginPath(); ctx.arc(x - r * 0.18, y + r * 0.12, r * 0.3, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = r * 0.1;
+  ctx.beginPath(); ctx.arc(x + r * 0.05, y + r * 0.2, r * 0.55, -Math.PI * 0.95, -Math.PI * 0.2); ctx.stroke();
+}
+
 function drawTouchControls(ctx, p) {
   const L = touchLayout(R.W, R.H);
   // Move stick.
@@ -627,9 +783,9 @@ function drawTouchControls(ctx, p) {
   ctx.fillStyle = "rgba(90,160,255,0.75)";
   ctx.beginPath(); ctx.arc(kx, ky, L.maxDrag * 0.35, 0, TAU); ctx.fill();
 
-  // Attack button.
+  // Attack button (a kick while carrying the ball).
   const at = Input.aimTouch.atk;
-  ctx.fillStyle = "rgba(255,90,70,0.8)";
+  ctx.fillStyle = G.ball && G.ball.holder === p ? "rgba(240,240,240,0.85)" : "rgba(255,90,70,0.8)";
   ctx.beginPath(); ctx.arc(L.atk.x, L.atk.y, L.atk.r, 0, TAU); ctx.fill();
   if (at) {
     ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 3;
@@ -638,14 +794,14 @@ function drawTouchControls(ctx, p) {
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     ctx.beginPath(); ctx.arc(at.ox + dx * k, at.oy + dy * k, L.atk.r * 0.45, 0, TAU); ctx.fill();
   } else {
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+    ctx.strokeStyle = G.ball && G.ball.holder === p ? "#333" : "#fff"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(L.atk.x, L.atk.y, L.atk.r * 0.4, 0, TAU); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(L.atk.x - L.atk.r * 0.6, L.atk.y); ctx.lineTo(L.atk.x + L.atk.r * 0.6, L.atk.y);
     ctx.moveTo(L.atk.x, L.atk.y - L.atk.r * 0.6); ctx.lineTo(L.atk.x, L.atk.y + L.atk.r * 0.6); ctx.stroke();
   }
   // Super button.
   const su = Input.aimTouch.sup;
-  if (su && p.superC >= 1) {
+  if (su && (p.superC >= 1 || (G.ball && G.ball.holder === p))) {
     const dx = su.x - su.ox, dy = su.y - su.oy, d = Math.hypot(dx, dy), k = Math.min(1, L.maxDrag / (d || 1));
     superDial(ctx, su.ox + dx * k, su.oy + dy * k, L.sup.r, p);
   } else superDial(ctx, L.sup.x, L.sup.y, L.sup.r, p);

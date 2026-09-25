@@ -30,6 +30,7 @@ canvas#game { position: fixed; inset: 0; display: block; }
   touch-action: auto;
 }
 .screen.hidden { display: none; }
+[hidden] { display: none !important; }
 
 .card {
   width: min(760px, 100%);
