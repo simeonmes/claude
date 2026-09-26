@@ -297,10 +297,10 @@ function drawBall(ctx, ball) {
   ctx.beginPath(); ctx.arc(x, cy, r, 0, TAU); ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.8)";
   ctx.beginPath(); ctx.arc(x - r * 0.35, cy - r * 0.4, r * 0.18, 0, TAU); ctx.fill();
-  // Landing spot for a lobbed pass.
-  if (ball.lob) {
-    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 0.05;
-    ctx.beginPath(); ctx.arc(ball.lob.x1, ball.lob.y1, 0.4, 0, TAU); ctx.stroke();
+  // A Super kick glows while it's travelling fast.
+  if (ball.power) {
+    ctx.strokeStyle = `rgba(255,205,60,${0.6 + Math.sin(G.time * 30) * 0.3})`; ctx.lineWidth = 0.07;
+    ctx.beginPath(); ctx.arc(x, cy, r * 1.35, 0, TAU); ctx.stroke();
   }
 }
 
@@ -493,9 +493,8 @@ function drawAim(ctx) {
   if (!p || p.dead || !a || G.state !== "play") return;
   const carrying = G.ball && G.ball.holder === p;
   const shape = aimShapes(p)[a.kind];
-  const ready = carrying || (a.kind === "sup" ? p.superC >= 1 : p.ammo >= 1);
-  const col = carrying ? (a.kind === "sup" ? "140,230,140" : "255,255,255")
-    : a.kind === "sup" ? (ready ? "255,205,60" : "160,160,160") : (ready ? "255,255,255" : "255,120,120");
+  const ready = a.kind === "sup" ? p.superC >= 1 : p.ammo >= 1;
+  const col = a.kind === "sup" ? (ready ? "255,205,60" : "160,160,160") : (ready ? "255,255,255" : "255,120,120");
   const strong = a.strong ? 1 : 0.55;
   ctx.fillStyle = `rgba(${col},${0.22 * strong})`;
   ctx.strokeStyle = `rgba(${col},${0.55 * strong})`;
@@ -602,20 +601,11 @@ function drawHUD(ctx) {
   ctx.fillStyle = "rgba(10,14,30,0.75)";
   roundRect(ctx, px, py, pw, ph, ph / 2); ctx.fill();
   const fs = Math.round(ph * 0.55);
-  if (G.mode === "ball") drawBallScore(ctx, px, py, pw, ph, fs);
-  else for (let t = 0; t < 2; t++) {
-    const cx = W / 2 + (t === 0 ? -pw * 0.25 : pw * 0.25), cy = py + ph / 2;
-    ctx.fillStyle = TEAM_COLORS[t];
-    roundRect(ctx, cx - pw * 0.22, py + 4, pw * 0.44, ph - 8, (ph - 8) / 2); ctx.fill();
-    drawGemShape(ctx, cx - fs * 0.7, cy, fs * 0.42);
-    ctx.fillStyle = "#e3c4ff"; ctx.fill();
-    ctx.font = `900 ${fs}px system-ui, sans-serif`;
-    ctx.fillStyle = "#fff";
-    ctx.fillText(String(G.teamGems[t]), cx + fs * 0.35, cy + 1);
-  }
-  if (G.countTeam >= 0 && G.state === "play") {
+  drawScorePanel(ctx, px, py, pw, ph, fs);
+  if (G.mode === "gem" && G.countTeam >= 0 && G.state === "play") {
     const mine = G.countTeam === 0;
-    const text = `${mine ? "YOUR TEAM WINS" : "ENEMIES WIN"} IN ${Math.ceil(G.countdown)}`;
+    const text = G.countPaused ? `TIED ON GEMS · COUNTDOWN PAUSED AT ${Math.ceil(G.countdown)}`
+      : `${mine ? "YOUR TEAM WINS" : "ENEMIES WIN"} IN ${Math.ceil(G.countdown)}`;
     ctx.font = `900 ${Math.round(fs * 0.85)}px system-ui, sans-serif`;
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.fillStyle = mine ? "#7fc1ff" : "#ff7a7a";
     ctx.strokeText(text, W / 2, py + ph + fs * 0.8); ctx.fillText(text, W / 2, py + ph + fs * 0.8);
@@ -673,15 +663,22 @@ function drawHUD(ctx) {
   else drawDesktopSuper(ctx, p);
 }
 
-function drawBallScore(ctx, px, py, pw, ph, fs) {
-  const W = R.W, cy = py + ph / 2;
+// Team scores (gems or goals) either side of the match clock.
+function drawScorePanel(ctx, px, py, pw, ph, fs) {
+  const W = R.W, cy = py + ph / 2, gem = G.mode === "gem";
   for (let t = 0; t < 2; t++) {
     const cx = W / 2 + (t === 0 ? -pw * 0.32 : pw * 0.32);
     ctx.fillStyle = TEAM_COLORS[t];
     roundRect(ctx, cx - pw * 0.15, py + 4, pw * 0.3, ph - 8, (ph - 8) / 2); ctx.fill();
+    let tx = cx;
+    if (gem) {
+      drawGemShape(ctx, cx - fs * 0.55, cy, fs * 0.36);
+      ctx.fillStyle = "#e3c4ff"; ctx.fill();
+      tx = cx + fs * 0.3;
+    }
     ctx.font = `900 ${fs}px system-ui, sans-serif`;
     ctx.fillStyle = "#fff";
-    ctx.fillText(String(G.score[t]), cx, cy + 1);
+    ctx.fillText(String(gem ? G.teamGems[t] : G.score[t]), tx, cy + 1);
   }
   const secs = Math.max(0, Math.ceil(G.clock)), clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
   const hurry = G.overtime || secs <= 10;
@@ -730,12 +727,11 @@ function drawDesktopSuper(ctx, p) {
   superDial(ctx, x, y, r, p);
   const carrying = G.ball && G.ball.holder === p;
   ctx.font = `800 ${Math.round(r * 0.32)}px system-ui, sans-serif`;
-  ctx.fillStyle = carrying ? "#9be89b" : p.superC >= 1 ? "#ffd23f" : "#aab";
-  ctx.fillText(carrying ? "PASS (E)" : p.superC >= 1 ? "E / RIGHT-CLICK" : "SUPER", x, y + r * 1.45);
+  ctx.fillStyle = p.superC >= 1 ? "#ffd23f" : "#aab";
+  ctx.fillText(p.superC >= 1 ? (carrying ? "SUPER KICK (E)" : "E / RIGHT-CLICK") : "SUPER", x, y + r * 1.45);
 }
 
 function superDial(ctx, x, y, r, p) {
-  if (G.ball && G.ball.holder === p) { passDial(ctx, x, y, r); return; }
   const ready = p.superC >= 1;
   ctx.fillStyle = ready ? "#ffc526" : "rgba(40,40,50,0.75)";
   ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
@@ -754,18 +750,6 @@ function superDial(ctx, x, y, r, p) {
     ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
   }
   ctx.closePath(); ctx.fill();
-}
-
-// While carrying the ball the super button becomes a pass button.
-function passDial(ctx, x, y, r) {
-  ctx.fillStyle = "#4fbf5a";
-  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = r * 0.08;
-  ctx.beginPath(); ctx.arc(x, y, r * 1.06, 0, TAU); ctx.stroke();
-  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#1c4d22"; ctx.lineWidth = r * 0.08;
-  ctx.beginPath(); ctx.arc(x - r * 0.18, y + r * 0.12, r * 0.3, 0, TAU); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = r * 0.1;
-  ctx.beginPath(); ctx.arc(x + r * 0.05, y + r * 0.2, r * 0.55, -Math.PI * 0.95, -Math.PI * 0.2); ctx.stroke();
 }
 
 function drawTouchControls(ctx, p) {
@@ -801,7 +785,7 @@ function drawTouchControls(ctx, p) {
   }
   // Super button.
   const su = Input.aimTouch.sup;
-  if (su && (p.superC >= 1 || (G.ball && G.ball.holder === p))) {
+  if (su && p.superC >= 1) {
     const dx = su.x - su.ox, dy = su.y - su.oy, d = Math.hypot(dx, dy), k = Math.min(1, L.maxDrag / (d || 1));
     superDial(ctx, su.ox + dx * k, su.oy + dy * k, L.sup.r, p);
   } else superDial(ctx, L.sup.x, L.sup.y, L.sup.r, p);

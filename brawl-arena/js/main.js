@@ -194,7 +194,7 @@ function playerInput() {
 
 // Aim shapes for the attack and super buttons: kick and pass while carrying the ball.
 function aimShapes(p) {
-  if (G.ball && G.ball.holder === p) return { atk: BALL_AIM.kick, sup: BALL_AIM.pass };
+  if (G.ball && G.ball.holder === p) return { atk: BALL_AIM.kick, sup: BALL_AIM.superKick };
   return { atk: p.def.aim, sup: p.def.superAim };
 }
 

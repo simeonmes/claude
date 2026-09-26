@@ -6,14 +6,19 @@ const STEP = 1 / 60;
 const RESPAWN_T = 3;
 const REGEN_DELAY = 3, REGEN_RATE = 0.13;  // 13% of max health per second after 3s out of combat
 const BUSH_REVEAL = 2.6;                    // enemies this close can see into your bush
-const GEM_GOAL = 10, GEM_COUNTDOWN = 15, GEM_SPAWN_T = 7;
-// Brawl Ball: first to 2 goals, 2:30 on the clock, sudden-death overtime if tied.
+// Gem Grab: 3:30 match, mine drops a gem every 7s (paused while 15 lie loose), hold 10
+// for 15s. At time-out the team with more gems wins.
+const GEM_GOAL = 10, GEM_COUNTDOWN = 15, GEM_SPAWN_T = 7, GEM_TIME = 210, GEM_FIELD_CAP = 15;
+// Brawl Ball: first to 2 goals, 2:30 on the clock, then 1 minute of sudden-death overtime
+// with every obstacle destroyed; still tied after that is a draw.
 const BALL_GOALS = 2, BALL_TIME = 150, BALL_OVERTIME = 60, GOAL_PAUSE = 2.5;
-const BALL_R = 0.22, KICK_SPEED = 16, BALL_FRICTION = 1.5, PASS_RANGE = 8;
-// Aim shapes while carrying the ball: attack kicks it along the ground, super lobs a pass.
+// Kicks cost one ammo; the Super kicks harder and further. Picking the ball up gives a
+// short burst of speed. (Exact official speeds and ranges aren't published: tunable.)
+const BALL_R = 0.22, KICK_SPEED = 16, SUPER_KICK_SPEED = 22, BALL_FRICTION = 1.5;
+const PICKUP_BOOST_T = 1, PICKUP_BOOST = 1.25;
 const BALL_AIM = {
   kick: { type: "line", range: KICK_SPEED / BALL_FRICTION, width: BALL_R * 2 },
-  pass: { type: "lob", range: PASS_RANGE, radius: 0.6, minRange: 1.5 },
+  superKick: { type: "line", range: SUPER_KICK_SPEED / BALL_FRICTION, width: BALL_R * 3 },
 };
 
 const G = {
@@ -62,6 +67,7 @@ class Brawler {
     this.leap = null;
     this.walkT = 0;
     this.holdT = 0;
+    this.boostT = 0;
     this.superReadyShown = this.superC >= 1;
   }
 
@@ -84,6 +90,7 @@ class Brawler {
     this.hitT = Math.max(0, this.hitT - dt);
     this.cool = Math.max(0, this.cool - dt);
     this.aimT = Math.max(0, this.aimT - dt);
+    this.boostT = Math.max(0, this.boostT - dt);
     this.combatT += dt;
     this.ammo = Math.min(3, this.ammo + dt / this.def.reload);
     if (this.combatT > REGEN_DELAY && this.hp < this.maxHp) {
@@ -116,7 +123,7 @@ class Brawler {
     let mx = inp.mx || 0, my = inp.my || 0;
     const m = Math.hypot(mx, my);
     if (m > 1) { mx /= m; my /= m; }
-    const sp = this.def.speed;
+    const sp = this.def.speed * (this.boostT > 0 ? PICKUP_BOOST : 1);
     moveBody(this, (mx * sp + this.kx) * dt, (my * sp + this.ky) * dt);
     const kd = Math.exp(-7 * dt);
     this.kx *= kd; this.ky *= kd;
@@ -126,18 +133,21 @@ class Brawler {
     }
     if (inp.aimAng != null) { this.faceAng = inp.aimAng; this.aimT = Math.max(this.aimT, 0.1); }
 
-    // Carrying the ball: attack kicks it, super passes it. No shooting while you hold it.
+    // Carrying the ball: attack kicks it (one ammo), Super kicks it harder. No shooting
+    // while you hold it.
     if (G.ball && G.ball.holder === this) {
       this.holdT += dt;
       this.superQ = null;
       // A held fire button from before the pickup doesn't kick: let go and press again.
       if (!inp.fire && this.holdT > 0.1) this.kickReady = true;
-      if (inp.super) {
+      if (inp.super && this.superC >= 1) {
+        this.superC = 0; this.superReadyShown = false;
         this.faceAng = inp.superAng; this.aimT = 0.3; this.cool = 0.3;
-        passBall(G, this, inp.superAng, inp.superDist ?? PASS_RANGE);
-      } else if (inp.fire && this.cool <= 0 && this.kickReady) {
+        kickBall(G, this, inp.superAng, SUPER_KICK_SPEED);
+      } else if (inp.fire && this.cool <= 0 && this.kickReady && this.ammo >= 1) {
+        this.ammo -= 1;
         this.faceAng = inp.fireAng; this.aimT = 0.3; this.cool = 0.35;
-        kickBall(G, this, inp.fireAng);
+        kickBall(G, this, inp.fireAng, KICK_SPEED);
       }
       this.vx = (this.x - x0) / dt; this.vy = (this.y - y0) / dt;
       return;
@@ -257,6 +267,7 @@ function spawnShot(G, b, ang, o) {
     vx: Math.cos(ang) * o.speed, vy: Math.sin(ang) * o.speed,
     range: o.range, travelled: 0.3, r: o.r, dmg: o.dmg, color: o.color, team: b.team, owner: b,
     knock: o.knock || 0, breakWalls: !!o.breakWalls, isSuper: !!o.isSuper, fist: !!o.fist, ang,
+    pierce: o.pierce ? new Set() : null,   // piercing shots pass through, hitting each enemy once
   });
 }
 
@@ -274,11 +285,12 @@ function updateShots(G, dt) {
         else { G.fx.push({ type: "spark", x: s.x, y: s.y, t: 0, T: 0.2, color: s.color }); dead = true; break; }
       }
       for (const e of G.brawlers) {
-        if (e.team === s.team || e.dead || e.leap) continue;
+        if (e.team === s.team || e.dead || e.leap || (s.pierce && s.pierce.has(e))) continue;
         if (Math.hypot(e.x - s.x, e.y - s.y) < e.r + s.r) {
           damage(G, e, s.dmg, s.owner, s.isSuper);
           if (s.knock) knock(e, s.vx, s.vy, s.knock);
           G.fx.push({ type: "spark", x: s.x, y: s.y, t: 0, T: 0.25, color: "#fff" });
+          if (s.pierce) { s.pierce.add(e); continue; }
           dead = true;
           break;
         }
@@ -375,7 +387,8 @@ function kill(G, e, src) {
 function updateGems(G, dt) {
   const map = G.map;
   G.mineT -= dt;
-  if (G.mineT <= 0) {
+  if (G.mineT <= 0 && G.gems.length >= GEM_FIELD_CAP) G.mineT = 0;   // mine waits while the field is full
+  else if (G.mineT <= 0) {
     G.mineT += GEM_SPAWN_T;
     const a = rand(0, TAU), s = rand(1, 2.2);
     G.gems.push({ x: map.mine.x, y: map.mine.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, z: 0.2, vz: 4.5, age: 0 });
@@ -414,6 +427,9 @@ function updateGems(G, dt) {
 function updateGemRule(G, dt) {
   const [a, b] = G.teamGems;
   const lead = a >= GEM_GOAL && a > b ? 0 : b >= GEM_GOAL && b > a ? 1 : -1;
+  // Both teams on 10+ and level: the countdown holds where it is until someone pulls ahead.
+  if (lead < 0 && a >= GEM_GOAL && a === b && G.countTeam >= 0) { G.countPaused = true; return; }
+  G.countPaused = false;
   if (lead !== G.countTeam) {
     G.countTeam = lead;
     G.countdown = GEM_COUNTDOWN;
@@ -431,11 +447,25 @@ function updateGemRule(G, dt) {
   }
 }
 
+// Gem Grab time-out: most gems wins, level is a draw.
+function updateGemClock(G, dt) {
+  G.clock -= dt;
+  if (G.clock <= 10 && G.clock > 0 && Math.ceil(G.clock) !== Math.ceil(G.clock + dt)) sfx(G, "tick", G.map.center, 0.6);
+  if (G.clock > 0) return;
+  G.clock = 0;
+  const [a, b] = G.teamGems;
+  G.winner = a > b ? 0 : b > a ? 1 : -1;
+  G.draw = G.winner < 0;
+  G.state = "ending";
+  G.overT = 2.6;
+  sfx(G, G.winner === 0 ? "win" : "lose", G.map.center);
+}
+
 // ---------------------------------------------------------------------------- brawl ball
 
 function newBall(G) {
   const s = G.map.ballSpot;
-  return { x: s.x, y: s.y, z: 0, vx: 0, vy: 0, holder: null, lob: null, noPick: null, noPickT: 0, last: null, spin: 0 };
+  return { x: s.x, y: s.y, z: 0, vx: 0, vy: 0, holder: null, noPick: null, noPickT: 0, last: null, spin: 0, power: false };
 }
 
 // Where team t shoots: the middle of the goal the other team defends.
@@ -449,41 +479,16 @@ function dropBall(G, vx, vy) {
   ball.noPick = h; ball.noPickT = 0.5;
 }
 
-function kickBall(G, b, ang) {
+function kickBall(G, b, ang, speed) {
   const ball = G.ball;
   ball.holder = null;
-  ball.lob = null;
   const fx = b.x + Math.cos(ang) * 0.3, fy = b.y + Math.sin(ang) * 0.3;
   if (solidAt(G.map, fx, fy)) { ball.x = b.x; ball.y = b.y; } else { ball.x = fx; ball.y = fy; }
   ball.z = 0;
-  ball.vx = Math.cos(ang) * KICK_SPEED; ball.vy = Math.sin(ang) * KICK_SPEED;
+  ball.vx = Math.cos(ang) * speed; ball.vy = Math.sin(ang) * speed;
+  ball.power = speed > KICK_SPEED;
   ball.noPick = b; ball.noPickT = 0.4; ball.last = b;
-  sfx(G, "kick", b);
-}
-
-// Lob pass: flies over walls and water and can't be caught until it comes down.
-function passBall(G, b, ang, dist) {
-  const ball = G.ball, map = G.map;
-  const d = clamp(dist, BALL_AIM.pass.minRange, PASS_RANGE);
-  let tx = clamp(b.x + Math.cos(ang) * d, 0.5, map.w - 0.5), ty = clamp(b.y + Math.sin(ang) * d, 0.5, map.h - 0.5);
-  if (solidAt(map, tx, ty) || goalAt(map, tx, ty)) {
-    // Never land in a wall, the water or straight in a net: pick the nearest open tile.
-    let best = null, bd = 1e9;
-    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-      const cx = Math.floor(tx) + dx + 0.5, cy = Math.floor(ty) + dy + 0.5;
-      if (solidAt(map, cx, cy) || goalAt(map, cx, cy)) continue;
-      const e = (cx - tx) ** 2 + (cy - ty) ** 2;
-      if (e < bd) { bd = e; best = [cx, cy]; }
-    }
-    if (best) [tx, ty] = best; else { tx = b.x; ty = b.y; }
-  }
-  const len = Math.hypot(tx - b.x, ty - b.y);
-  ball.holder = null;
-  ball.lob = { x0: b.x, y0: b.y, x1: tx, y1: ty, t: 0, T: 0.4 + len * 0.045, h: 0.9 + len * 0.13 };
-  ball.x = b.x; ball.y = b.y;
-  ball.vx = len ? (tx - b.x) / len * 2 : 0; ball.vy = len ? (ty - b.y) / len * 2 : 0;   // rolls on after landing
-  ball.noPick = b; ball.noPickT = ball.lob.T + 0.2; ball.last = b;
-  sfx(G, "throw", b);
+  sfx(G, ball.power ? "superKick" : "kick", b);
 }
 
 function updateBall(G, dt) {
@@ -495,14 +500,6 @@ function updateBall(G, dt) {
     if (solidAt(map, fx, fy)) { ball.x = h.x; ball.y = h.y; } else { ball.x = fx; ball.y = fy; }
     ball.z = h.z;
     ball.spin += Math.hypot(h.vx, h.vy) * dt * 3;
-  } else if (ball.lob) {
-    const L = ball.lob;
-    L.t += dt;
-    const t = Math.min(1, L.t / L.T);
-    ball.x = lerp(L.x0, L.x1, t); ball.y = lerp(L.y0, L.y1, t);
-    ball.z = 4 * t * (1 - t) * L.h;
-    ball.spin += dt * 12;
-    if (t >= 1) { ball.lob = null; ball.z = 0; sfx(G, "bounce", ball, 0.6); }
   } else {
     // Rolls along the ground and bounces off walls, water and the fence.
     const sp = Math.hypot(ball.vx, ball.vy), n = Math.max(1, Math.ceil(sp * dt / 0.1));
@@ -517,14 +514,20 @@ function updateBall(G, dt) {
     const f = Math.exp(-BALL_FRICTION * dt);
     ball.vx *= f; ball.vy *= f;
     if (Math.hypot(ball.vx, ball.vy) < 0.3) { ball.vx = 0; ball.vy = 0; }
+    if (Math.hypot(ball.vx, ball.vy) < KICK_SPEED * 0.5) ball.power = false;
     ball.spin += sp * dt * 3;
   }
 
-  // Goal: the ball (on the ground or at the carrier's feet) crosses into a net.
+  // Goal: the ball (on the ground or at the carrier's feet) crosses into a net. There are
+  // no own goals: a carrier stepping into their own net lets go of the ball, and a ball a
+  // team kicked toward its own net bounces back off the goal line.
   const h = ball.holder;
-  if (ball.z < 0.5 && (goalAt(map, ball.x, ball.y) || (h && goalAt(map, h.x, h.y)))) {
+  if (goalAt(map, ball.x, ball.y) || (h && goalAt(map, h.x, h.y))) {
     const y = h && goalAt(map, h.x, h.y) ? h.y : ball.y;
-    scoreGoal(G, y < map.h / 2 ? 0 : 1);
+    const team = y < map.h / 2 ? 0 : 1;           // the team this goal would count for
+    const who = h || ball.last;
+    if (who && who.team !== team) { refuseOwnGoal(G, 1 - team); return; }
+    scoreGoal(G, team);
     return;
   }
 
@@ -539,14 +542,25 @@ function updateBall(G, dt) {
   if (taker) {
     ball.holder = taker;
     ball.last = taker;
-    ball.lob = null;
     ball.vx = 0; ball.vy = 0;
+    ball.power = false;
     taker.holdT = 0;
+    taker.boostT = PICKUP_BOOST_T;
     taker.kickReady = false;
     taker.burst = null;
     taker.superQ = null;
     sfx(G, "catch", taker, taker.team === 0 ? 1 : 0.6);
   }
+}
+
+// Push the ball back out of goal `t` (the goal team t defends) onto the pitch.
+function refuseOwnGoal(G, t) {
+  const ball = G.ball, g = G.map.goals[t];
+  if (ball.holder) dropBall(G, 0, 0);
+  ball.y = g.line + g.out * (BALL_R + 0.05);
+  ball.x = clamp(ball.x, g.x0 + BALL_R, g.x1 - BALL_R);
+  ball.vy = Math.abs(ball.vy) * 0.6 * g.out + g.out * 1.5;
+  ball.vx *= 0.6;
 }
 
 function scoreGoal(G, team) {
@@ -590,10 +604,12 @@ function updateClock(G, dt) {
   G.clock = 0;
   const [a, b] = G.score;
   if (a === b && !G.overtime) {
-    // Tied at the buzzer: sudden death, next goal wins.
+    // Tied at the buzzer: sudden death, next goal wins, and every obstacle is destroyed.
     G.overtime = true;
     G.clock = BALL_OVERTIME;
+    clearObstacles(G);
     sfx(G, "whistle", G.map.center);
+    sfx(G, "boom", G.map.center, 0.7);
     return;
   }
   G.winner = a > b ? 0 : b > a ? 1 : -1;
@@ -603,21 +619,20 @@ function updateClock(G, dt) {
   sfx(G, G.winner === 0 ? "win" : "lose", G.map.center);
 }
 
-// Quick-aim while carrying: kicks go at the enemy goal, passes to the best-placed teammate.
-function ballAutoAim(b, kind) {
-  const goal = enemyGoal(b.team), gx = goal.cx, gy = goal.line - goal.out * 0.5;
-  if (kind === "sup") {
-    let best = null, bs = 1e9;
-    for (const f of G.brawlers) {
-      if (f === b || f.team !== b.team || f.dead) continue;
-      const d = Math.hypot(f.x - b.x, f.y - b.y);
-      if (d > PASS_RANGE + 1 || d < 1.5) continue;
-      const score = Math.hypot(f.x - gx, f.y - gy);
-      if (score < bs) { bs = score; best = f; }
-    }
-    if (best) return { ang: Math.atan2(best.y + best.vy * 0.4 - b.y, best.x + best.vx * 0.4 - b.x), dist: Math.hypot(best.x - b.x, best.y - b.y) };
+// Brawl Ball overtime: walls, crates and bushes all go, leaving an open pitch.
+function clearObstacles(G) {
+  const map = G.map;
+  for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+    const c = map.tiles[y][x];
+    if (BREAKABLE.has(c)) breakTile(G, x, y);
+    else if (c === '"') { map.tiles[y][x] = "."; map.version++; }
   }
-  return { ang: Math.atan2(gy - b.y, gx - b.x), dist: Math.min(PASS_RANGE, Math.hypot(gx - b.x, gy - b.y)) };
+}
+
+// Quick-aim while carrying: both kicks go at the middle of the enemy goal.
+function ballAutoAim(b) {
+  const goal = enemyGoal(b.team), gx = goal.cx, gy = goal.line - goal.out * 0.5;
+  return { ang: Math.atan2(gy - b.y, gx - b.x), dist: Math.hypot(gx - b.x, gy - b.y) };
 }
 
 // ---------------------------------------------------------------------------- effects
@@ -638,7 +653,7 @@ function newMatch(opts) {
   G.mode = G.map.mode;
   G.level = opts.level;
   G.brawlers = []; G.shots = []; G.bombs = []; G.gems = []; G.fx = []; G.texts = []; G.feed = []; G.sounds = [];
-  G.teamGems = [0, 0]; G.countTeam = -1; G.countdown = GEM_COUNTDOWN; G.mineT = 3;
+  G.teamGems = [0, 0]; G.countTeam = -1; G.countdown = GEM_COUNTDOWN; G.countPaused = false; G.mineT = 3;
   G.score = [0, 0]; G.clock = BALL_TIME; G.overtime = false; G.goalT = 0; G.lastGoal = null; G.kickoffs = 0;
   G.time = 0; G.intro = 3; G.winner = -1; G.draw = false; G.overT = 0; G.paused = false;
   const keys = Object.keys(BRAWLERS);
@@ -659,6 +674,7 @@ function newMatch(opts) {
   }
   G.player = G.brawlers.find((b) => b.isPlayer) || null;
   G.ball = G.mode === "ball" ? newBall(G) : null;
+  G.clock = G.mode === "ball" ? BALL_TIME : GEM_TIME;
   G.state = "play";
 }
 
@@ -691,6 +707,7 @@ function step(dt, playerInp) {
   } else {
     updateGems(G, dt);
     if (G.state === "play") updateGemRule(G, dt);
+    if (G.state === "play") updateGemClock(G, dt);
   }
 }
 

@@ -5,8 +5,8 @@
 // at the goal when they have a clear lane.
 
 const BOT_LEVELS = {
-  easy: { name: "Easy", react: 0.5, aimErr: 0.3, lead: 0, strafe: 0.35, think: 0.35, eager: 0.35, superUse: 0.5, retreat: 0.25 },
-  normal: { name: "Normal", react: 0.28, aimErr: 0.14, lead: 0.6, strafe: 0.75, think: 0.2, eager: 0.7, superUse: 0.85, retreat: 0.35 },
+  easy: { name: "Easy", react: 0.5, aimErr: 0.3, lead: 0, strafe: 0.35, think: 0.35, eager: 0.35, superUse: 0.5, retreat: 0.3 },
+  normal: { name: "Normal", react: 0.28, aimErr: 0.14, lead: 0.6, strafe: 0.75, think: 0.2, eager: 0.7, superUse: 0.85, retreat: 0.4 },
   hard: { name: "Hard", react: 0.14, aimErr: 0.06, lead: 0.95, strafe: 1, think: 0.1, eager: 1, superUse: 1, retreat: 0.4 },
 };
 
@@ -102,7 +102,6 @@ class Bot {
   // Where a loose ball will be by the time we can reach it.
   ballSpot() {
     const ball = G.ball;
-    if (ball.lob) return { x: ball.lob.x1, y: ball.lob.y1 };
     const sp = Math.hypot(ball.vx, ball.vy);
     if (sp < 0.3) return { x: ball.x, y: ball.y };
     // Intercept: somewhere along its roll, closer for faster brawlers.
@@ -201,7 +200,9 @@ class Bot {
       }
       return n;
     };
-    const kickRange = BALL_AIM.kick.range;
+    const hasSuper = b.superC >= 1;
+    const kickRange = hasSuper ? BALL_AIM.superKick.range : BALL_AIM.kick.range;
+    if (b.ammo < 1 && !hasSuper) return;    // no ammo, no kick: keep dribbling
 
     const pressured = near < 2.4 || (b.combatT < 0.5 && b.hp < b.maxHp * 0.45);
 
@@ -219,8 +220,10 @@ class Bot {
       // Under pressure it's worth trying to beat one defender rather than losing the ball.
       const worth = bestShot && (bs < 5 || (pressured && bs < 10)) && (toGoal < kickRange * 0.75 || pressured || Math.random() < dt * 3);
       if (worth && !(toGoal < 2 && near > 2.5)) {
-        inp.fire = true;
-        inp.fireAng = Math.atan2(bestShot.y - b.y, bestShot.x - b.x) + (Math.random() - 0.5) * L.aimErr;
+        // The Super kick is faster and goes further, so save it for longer shots.
+        const ang = Math.atan2(bestShot.y - b.y, bestShot.x - b.x) + (Math.random() - 0.5) * L.aimErr;
+        if (hasSuper && (toGoal > BALL_AIM.kick.range * 0.7 || b.ammo < 1)) { inp.super = true; inp.superAng = ang; }
+        else if (b.ammo >= 1) { inp.fire = true; inp.fireAng = ang; }
         return;
       }
     }
@@ -231,7 +234,7 @@ class Bot {
       for (const f of G.brawlers) {
         if (f === b || f.team !== b.team || f.dead) continue;
         const d = Math.hypot(f.x - b.x, f.y - b.y);
-        if (d < 2 || d > PASS_RANGE) continue;
+        if (d < 2 || d > BALL_AIM.kick.range * 0.8) continue;
         const fGoal = Math.hypot(foe.cx - f.x, foe.line - f.y);
         const fNear = enemies.reduce((m, e) => Math.min(m, Math.hypot(e.x - f.x, e.y - f.y)), 99);
         if (fNear < 2) continue;
@@ -241,12 +244,11 @@ class Bot {
       if (mate && Math.random() < L.eager * dt * 8) {
         const lead = 0.5, px = mate.x + mate.vx * lead, py = mate.y + mate.vy * lead;
         const ang = Math.atan2(py - b.y, px - b.x) + (Math.random() - 0.5) * L.aimErr;
-        if (walkClear(map, b.x, b.y, px, py, BALL_R) && !blockers(px, py)) {
-          inp.fire = true; inp.fireAng = ang;       // ground pass
-        } else {
-          inp.super = true; inp.superAng = ang; inp.superDist = Math.hypot(px - b.x, py - b.y);   // lob it over
+        // Passes are just kicks along the ground, so they need an open lane.
+        if (b.ammo >= 1 && walkClear(map, b.x, b.y, px, py, BALL_R) && !blockers(px, py)) {
+          inp.fire = true; inp.fireAng = ang;
+          return;
         }
-        return;
       }
       // Nobody to pass to and about to be defeated: boot it up the pitch, away from the enemies.
       if (b.combatT < 0.5 && b.hp < b.maxHp * 0.3) {
@@ -258,8 +260,8 @@ class Bot {
           const score = room - blockers(x, y) * 4 - Math.abs(i) * 0.4;
           if (score > bs) { bs = score; bestAng = a; }
         }
-        inp.fire = true;
-        inp.fireAng = bestAng + (Math.random() - 0.5) * L.aimErr;
+        const ang = bestAng + (Math.random() - 0.5) * L.aimErr;
+        if (b.ammo >= 1) { inp.fire = true; inp.fireAng = ang; } else { inp.super = true; inp.superAng = ang; }
       }
     }
   }

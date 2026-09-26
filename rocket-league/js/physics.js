@@ -67,6 +67,8 @@ class Car {
     this.yawAnim = 0;
     this.neutralJumpT = 0;
     this.wheelBallT = 0;
+    this.resetFlip = false;  // the flip we hold came from a flip reset
+    this.whiteDodge = false; // the current flip used it (a hit now is a white shot)
     this.touchCd = 0;
     this.boosting = false;
     this.ballWheelContact = false;
@@ -272,6 +274,7 @@ class Car {
         const spinDir = Math.abs(dx) > 0.25 ? Math.sign(dx) : (dy < 0 ? -1 : 1) * (Math.sign(n.x) || 1);
         this.dodgeT = P.DODGE_T;
         this.dodgeSpin = (spinDir * TAU) / P.DODGE_T;
+        this.whiteDodge = this.resetFlip;
         this.vx += dx * P.DODGE_V;
         this.vy = this.vy * (this.vy > 0 ? 0.2 : 0.7) + dy * P.DODGE_V;
         game.emit("dodge", this);
@@ -301,6 +304,7 @@ class Car {
         game.emit("jump", this);
       }
       this.flipAvailable = false;
+      this.resetFlip = false;
       this.jumpHoldT = 0;
     }
 
@@ -396,6 +400,8 @@ class Car {
     this.grounded = true;
     this.hasJumped = false;
     this.flipAvailable = false;
+    this.resetFlip = false;
+    this.whiteDodge = false;
     this.jumpHoldT = 0;
     this.dodgeT = 0;
     this.stallT = 0;
@@ -507,6 +513,7 @@ const SHOTS = {
   red: { name: "RED", color: "#ff3b3b", glow: "rgba(255,59,59,", boost: 0.18, add: 150, recoil: 0 },
   purple: { name: "PURPLE", color: "#b35cff", glow: "rgba(179,92,255,", boost: 0.12, add: 120, recoil: 320 },
   gold: { name: "GOLD", color: "#ffc53d", glow: "rgba(255,197,61,", boost: 0.3, add: 220, recoil: 280 },
+  white: { name: "WHITE", color: "#ffffff", glow: "rgba(255,255,255,", boost: 0.22, add: 180, recoil: 0 },
 };
 
 function collideCarBall(car, ball, game) {
@@ -569,10 +576,12 @@ function collideCarBall(car, ball, game) {
       // Sideswipe's coloured shots: a flip striking with the nose (red), a flip striking
       // with the tail (gold, the strongest), or a neutral double jump striking with the
       // underside (purple). Purple and gold also knock the car back off the ball, which
-      // is what makes them the safe shots.
+      // is what makes them the safe shots. Any flip into the ball using a flip won back
+      // from a flip reset is a white shot.
       const face = cx >= hl - 1 ? "nose" : cx <= -hl + 1 ? "tail" : cy <= -ht + 1 ? "under" : null;
       let shot = null;
-      if (car.dodgeT > 0 && face === "nose") shot = SHOTS.red;
+      if (car.dodgeT > 0 && car.whiteDodge) shot = SHOTS.white;
+      else if (car.dodgeT > 0 && face === "nose") shot = SHOTS.red;
       else if (car.dodgeT > 0 && face === "tail") shot = SHOTS.gold;
       else if (car.neutralJumpT > 0 && face === "under") shot = SHOTS.purple;
       if (shot) {
@@ -600,6 +609,7 @@ function collideCarBall(car, ball, game) {
     car.wheelBallT = 0.15;
     if (!car.grounded && !car.flipAvailable && car.dodgeT <= 0) {
       car.flipAvailable = true;
+      car.resetFlip = true;
       car.resetFlash = 1.1;
       game.emit("flipReset", car);
     }

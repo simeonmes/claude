@@ -39,7 +39,7 @@ const BRAWLERS = {
     name: "Pike",
     role: "Sharpshooter",
     desc: "Fires 6 quick bullets in a straight line. Long range, low health.",
-    superDesc: "Super: Bullet Storm. 12 long-range bullets that punch through walls.",
+    superDesc: "Super: Bullet Storm. 12 long-range bullets that pierce through walls and enemies.",
     color: "#3d7be0", dark: "#1b3d78", skin: "#f1c393",
     hp: 2800, speed: 2.4, reload: 1.8, superCost: 3200, prefRange: 7,
     bars: { hp: 0.45, dmg: 0.7, range: 0.9, speed: 0.5 },
@@ -54,7 +54,7 @@ const BRAWLERS = {
     },
     superAttack(G, b, ang) {
       b.burst = { n: 12, gap: 0.05, t: 0, ang, fire(G, b, a) {
-        spawnShot(G, b, a + rand(-0.03, 0.03), { speed: 21, range: 11, dmg: 320, r: 0.13, color: "#7fd0ff", breakWalls: true, isSuper: true });
+        spawnShot(G, b, a + rand(-0.03, 0.03), { speed: 21, range: 11, dmg: 320, r: 0.13, color: "#7fd0ff", breakWalls: true, pierce: true, isSuper: true });
         sfx(G, "pistol", b, 0.8);
       } };
     },
