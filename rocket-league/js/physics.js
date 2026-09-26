@@ -13,14 +13,18 @@ const P = {
   G: 650 * ACC,
   CAR_LEN: 78, CAR_H: 26, CAR_W: 54, RIDE: 19, WHEEL_R: 10,
   MAX_THROTTLE: 1410 * V, THROTTLE_ACC: 1600 * ACC, BRAKE: 3500 * ACC, COAST: 525 * ACC,
-  MAX_SPEED: 2300 * V, BOOST_ACC: 991.67 * ACC, SUPERSONIC: 2200 * V,
+  // Boost pushes a little harder in the air than on the ground (991.667 vs 1058.333 uu/s²),
+  // and holding the stick along the nose in the air adds a weak throttle (66.667 uu/s²).
+  MAX_SPEED: 2300 * V, BOOST_ACC: 991.67 * ACC, BOOST_ACC_AIR: 1058.33 * ACC, AIR_THROTTLE: 66.667 * ACC, SUPERSONIC: 2200 * V,
   // Sticky force pulling the wheels onto walls, as a fraction of gravity. Below 1, so a
   // car on the flat ceiling always drops off; curves at speed can still hold it on.
   STICK_THROTTLE: 0.6, STICK_IDLE: 0.35,
   JUMP_V: 292 * V, JUMP_HOLD_ACC: 1458 * ACC, JUMP_HOLD_T: 0.2 / TIME, DOUBLE_JUMP_V: 292 * V,
   DODGE_V: 500 * V, DODGE_T: 0.65 / TIME, STALL_T: 0.55 / TIME,
   AIR_ROT_MAX: 5.5 * TIME, AIR_ROT_ACC: 23 * TIME * TIME, AIR_ROT_DAMP: 3.7 * TIME, ROLL_SPEED: 5.5 * TIME,
-  BOOST_MAX: 100, BOOST_DRAIN: 33.3 * TIME, BOOST_REGEN: 46 * TIME,
+  // A full tank is 100 and drains at 33.3/s; every kickoff starts with 33. (The refill
+  // rate on surface contact isn't published.)
+  BOOST_MAX: 100, BOOST_DRAIN: 33.3 * TIME, BOOST_REGEN: 46 * TIME, KICKOFF_BOOST: 33.3,
   BALL_R: 58, BALL_MAX: 6000 * V, BALL_REST: 0.6, BALL_DRAG: 0.0305 * TIME,
   BALL_MASS: 30, CAR_MASS: 180,
   TURN_SPEED: 260 * TIME / 1.35, // below this ground speed, pushing the other way swings the car round
@@ -50,7 +54,7 @@ class Car {
     this.ds = 0;
     const p = pathAt(A, this.s);
     this.face = Math.sign(p.tx) === -Math.sign(spawnX) ? 1 : -1; // nose toward midfield
-    this.boost = P.BOOST_MAX;
+    this.boost = P.KICKOFF_BOOST;
     this.angVel = 0;
     this.hasJumped = false;
     this.flipAvailable = false;
@@ -339,10 +343,15 @@ class Car {
     const gScale = this.stallT > 0 ? 0.05 : 1;
     this.stallT -= dt;
     this.vy += P.G * gScale * dt;
+    const n = this.nose();
     if (this.boosting) {
-      const n = this.nose();
-      this.vx += n.x * P.BOOST_ACC * dt;
-      this.vy += n.y * P.BOOST_ACC * dt;
+      this.vx += n.x * P.BOOST_ACC_AIR * dt;
+      this.vy += n.y * P.BOOST_ACC_AIR * dt;
+    }
+    const push = clamp(inp.sx * n.x + inp.sy * n.y, -1, 1);
+    if (!inp.aim && Math.abs(push) > 0.3) {
+      this.vx += n.x * push * P.AIR_THROTTLE * dt;
+      this.vy += n.y * push * P.AIR_THROTTLE * dt;
     }
     const sp = Math.hypot(this.vx, this.vy);
     if (sp > P.MAX_SPEED) { this.vx *= P.MAX_SPEED / sp; this.vy *= P.MAX_SPEED / sp; }

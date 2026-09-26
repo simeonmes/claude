@@ -1,35 +1,41 @@
 "use strict";
 // The roster. Numbers follow Brawl Stars conventions: health and damage in the
-// thousands/hundreds, 3 ammo that reload over time, ranges and speeds in tiles
-// (normal walking speed is 2.4 tiles per second).
+// thousands/hundreds, 3 ammo that reload over time, ranges and speeds in tiles.
+// Brawl Stars measures speed in units where 300 = 1 tile; its speed tiers are Normal 720
+// (2.4 tiles/s), Fast 770 and Very Fast 820.
 //
 // aim / superAim describe the aiming indicator and how the attack is targeted:
 //   cone  (range, spread)   line (range)   lob (range, radius: lands at the aimed spot)
 //   leap  (range, radius: the brawler jumps to the aimed spot)
 
+const TILE_UNITS = 300;
+const SPEED = { normal: 720 / TILE_UNITS, fast: 770 / TILE_UNITS, veryFast: 820 / TILE_UNITS };
+
 const BRAWLERS = {
   buck: {
     name: "Buck",
     role: "Shotgun",
+    // Shelly's kit: 3800 HP, 5 shells x 300 over 30°, 7.67 tiles, 1.5 s reload; Super 9
+    // shells x 320 over 50° that knock back and destroy cover. ~10% Super per shell hit.
     desc: "Fires 5 shells in a spread. Every shell that lands hurts, so get close.",
     superDesc: "Super: Big Bang. A wide blast that knocks enemies back and smashes walls.",
     color: "#f08a3a", dark: "#8a4515", skin: "#f5c89a",
-    hp: 4200, speed: 2.55, reload: 1.5, superCost: 3000, prefRange: 3.2,
-    bars: { hp: 0.7, dmg: 0.85, range: 0.55, speed: 0.5 },
-    aim: { type: "cone", range: 7.2, spread: 0.52 },
-    superAim: { type: "cone", range: 7.8, spread: 0.8 },
+    hp: 3800, speed: SPEED.normal, reload: 1.5, superCost: 3000, prefRange: 3.2,
+    bars: { hp: 0.6, dmg: 0.85, range: 0.6, speed: 0.5 },
+    aim: { type: "cone", range: 7.67, spread: 30 * Math.PI / 180 },
+    superAim: { type: "cone", range: 7.67, spread: 50 * Math.PI / 180 },
     shotSpeed: 15,
     attack(G, b, ang) {
       for (let i = 0; i < 5; i++) {
-        spawnShot(G, b, ang + (i - 2) * 0.13 + rand(-0.02, 0.02),
-          { speed: 15 * rand(0.94, 1.06), range: 7.2, dmg: 360, r: 0.13, color: "#ffd27a" });
+        spawnShot(G, b, ang + (i - 2) * this.aim.spread / 4 + rand(-0.02, 0.02),
+          { speed: 15 * rand(0.94, 1.06), range: 7.67, dmg: 300, r: 0.13, color: "#ffd27a" });
       }
       sfx(G, "shotgun", b);
     },
     superAttack(G, b, ang) {
       for (let i = 0; i < 9; i++) {
-        spawnShot(G, b, ang + (i - 4) * 0.1,
-          { speed: 15, range: 7.8, dmg: 360, r: 0.16, color: "#ffb13b", knock: 2.2, breakWalls: true, isSuper: true });
+        spawnShot(G, b, ang + (i - 4) * this.superAim.spread / 8,
+          { speed: 15, range: 7.67, dmg: 320, r: 0.16, color: "#ffb13b", knock: 2.2, breakWalls: true, isSuper: true });
       }
       sfx(G, "boom", b, 0.7);
     },
@@ -41,7 +47,7 @@ const BRAWLERS = {
     desc: "Fires 6 quick bullets in a straight line. Long range, low health.",
     superDesc: "Super: Bullet Storm. 12 long-range bullets that pierce through walls and enemies.",
     color: "#3d7be0", dark: "#1b3d78", skin: "#f1c393",
-    hp: 2800, speed: 2.4, reload: 1.8, superCost: 3200, prefRange: 7,
+    hp: 2800, speed: SPEED.normal, reload: 1.8, superCost: 3200, prefRange: 7,
     bars: { hp: 0.45, dmg: 0.7, range: 0.9, speed: 0.5 },
     aim: { type: "line", range: 8.7 },
     superAim: { type: "line", range: 11 },
@@ -66,7 +72,7 @@ const BRAWLERS = {
     desc: "Lobs bombs over walls. They explode where they land and hit everyone nearby.",
     superDesc: "Super: Big Barrel. A huge bomb that blows up walls and knocks enemies flying.",
     color: "#58b848", dark: "#2c6a22", skin: "#f3c79c",
-    hp: 2800, speed: 2.4, reload: 1.9, superCost: 2500, prefRange: 5.8,
+    hp: 2800, speed: SPEED.normal, reload: 1.9, superCost: 2500, prefRange: 5.8,
     bars: { hp: 0.45, dmg: 0.8, range: 0.75, speed: 0.5 },
     aim: { type: "lob", range: 7.5, radius: 1.1, minRange: 1.2 },
     superAim: { type: "lob", range: 7.5, radius: 2.3, minRange: 1.2 },
@@ -87,8 +93,8 @@ const BRAWLERS = {
     desc: "Huge health and a flurry of 4 short-range punches. Walk through the bushes and brawl.",
     superDesc: "Super: Meteor Leap. Jump over anything and crash down on enemies, smashing walls.",
     color: "#8b55d6", dark: "#43246f", skin: "#e0a67a",
-    hp: 6600, speed: 2.85, reload: 1.15, superCost: 3500, prefRange: 1.2,
-    bars: { hp: 1, dmg: 0.75, range: 0.2, speed: 0.75 },
+    hp: 6600, speed: SPEED.fast, reload: 1.15, superCost: 3500, prefRange: 1.2,
+    bars: { hp: 1, dmg: 0.75, range: 0.2, speed: 0.65 },
     aim: { type: "line", range: 3.2, width: 0.9 },
     superAim: { type: "leap", range: 7, radius: 1.6, minRange: 1 },
     shotSpeed: 16,
